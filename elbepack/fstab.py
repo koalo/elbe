@@ -165,11 +165,12 @@ class fstabentry(hdpart):
             'xfs': f'-p {filesystem_tree}',
         }
         mkfs_fs_copy_extra_cmd_dict = {
-            'f2fs': f'sload.f2fs -f {filesystem_tree} {target}',
+            'f2fs': ['sload.f2fs', '-f', filesystem_tree, target],
         }
 
         mkfs_supports_fs_copy = self.fstype in mkfs_fs_copy_argument_dict or \
-            self.fstype in mkfs_fs_copy_extra_cmd_dict
+            self.fstype in mkfs_fs_copy_extra_cmd_dict or \
+            self.fstype == 'vfat'
 
         mkfs_fs_copy_argument = mkfs_fs_copy_argument_dict.get(self.fstype, '')
         do(
@@ -179,5 +180,17 @@ class fstabentry(hdpart):
 
         if self.fstype in mkfs_fs_copy_extra_cmd_dict:
             do(mkfs_fs_copy_extra_cmd_dict[self.fstype])
+        elif self.fstype == 'vfat':
+            # mtools is able to populate a FAT image directly
+
+            # A simple * glob would not catch all files correctly
+            # (in particular hidden files with .), so provide the top
+            # level files explicitly (after stripping the "." from
+            # filesystem_tree to work with listdir properly).
+            src_dir = filesystem_tree.removesuffix('.')
+            entries = sorted(os.listdir(src_dir))
+            if entries:
+                do(['mcopy', '-bsm', '-i', target,
+                    *(os.path.join(src_dir, e) for e in entries), '::'])
 
         return not mkfs_supports_fs_copy
