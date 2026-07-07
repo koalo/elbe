@@ -335,16 +335,20 @@ def create_binary(disk, part, ppart, target):
     entry = hdpart()
     entry.set_geometry(ppart, disk)
 
-    with entry.losetup() as loopdev:
-        # copy from buildenv if path starts with /
-        if part.text('binary')[0] == '/':
-            tmp = target + '/' + 'chroot' + part.text('binary')
-        # copy from project directory
-        else:
-            tmp = target + '/' + part.text('binary')
+    # copy from buildenv if path starts with /
+    if part.text('binary')[0] == '/':
+        tmp = target + '/' + 'chroot' + part.text('binary')
+    # copy from project directory
+    else:
+        tmp = target + '/' + part.text('binary')
 
-        tmp = _glob_single(tmp)
-        dd({'if': tmp, 'of': loopdev})
+    tmp = _glob_single(tmp)
+
+    # dd directly into entry.filename (the whole disk image) at the
+    # partition's byte offset. This is equivalent to dd into a loop
+    # device, but does not requires the elevated privileges of losetup.
+    dd({'if': tmp, 'of': entry.filename, 'bs': 512,
+        'seek': entry.offset // 512, 'conv': 'notrunc'})
 
 
 def create_logical_partitions(disk,
