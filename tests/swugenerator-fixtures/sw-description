@@ -1,0 +1,38 @@
+software = {
+ version = "1.0";
+ hardware-compatibility: [ "1.0" ];
+ stable : {
+  sys_a : {
+   images: (
+    {
+     filename = "rfs.img";
+     device = "/dev/mmcblk0p5";
+     type = "raw";
+     compressed = "zlib";
+    },
+    {
+     filename = "firmware.img";
+     device = "/dev/mmcblk0p2";
+     type = "raw";
+     compressed = "zlib";
+    }
+    );
+   };
+  sys_b : {
+   images: (
+    {
+     filename = "rfs.img";
+     device = "/dev/mmcblk0p6";
+     type = "raw";
+     compressed = "zlib";
+    },
+    {
+     filename = "firmware.img";
+     device = "/dev/mmcblk0p3";
+     type = "raw";
+     compressed = "zlib";
+    }
+    );
+  };
+ };
+}

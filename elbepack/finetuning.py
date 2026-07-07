@@ -8,6 +8,7 @@ import logging
 import os
 import shlex
 import subprocess
+import tempfile
 import textwrap
 from shutil import rmtree
 
@@ -510,6 +511,68 @@ class SetPackerAction(FinetuningAction):
         packer = self.node.et.attrib['packer']
 
         target.image_packers[img] = packers[packer]
+
+
+@_register_action('swugenerator')
+class SwuGeneratorAction(FinetuningAction):
+
+    def execute(self, _buildenv, _target):
+        raise NotImplementedError('<swugenerator> may only be '
+                                  'used in <project-finetuning>')
+
+    def execute_prj(self, buildenv, target, builddir):
+        # swugenerator relies on separate <losetup> or <export> elements
+        # to have already extracted the needed partitions/files
+        # so we just need to package them here
+
+        version = target.xml.text('project/version')
+        out = self.node.et.attrib['out'].replace('${version}', version)
+        outpath = os.path.join(builddir, out)
+        os.makedirs(os.path.dirname(outpath), exist_ok=True)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            desc_node = self.node.node('description')
+            desc_path = os.path.join(builddir, desc_node.et.text)
+
+            cfgpath = os.path.join(tmp, 'config')
+            with open(cfgpath, 'w') as f:
+                f.write(f'variables: {{ VERSION = "{version}"; }};\n')
+
+            cmd = ['swugenerator', '-o', outpath, '-a', builddir,
+                   '-c', cfgpath, '-s', desc_path]
+
+            # Check for no-compress attribute
+            no_compress = self.node.et.attrib.get('no-compress', 'false').lower()
+            if no_compress == 'true':
+                cmd.append('-n')
+
+            sign = self.node.node('sign')
+            if sign is not None:
+                sign_type = sign.et.attrib.get('type', 'cms')
+
+                if sign_type != 'cms':
+                    raise FinetuningException('currently only CMS signing mode is supported')
+
+                key_node = sign.node('key')
+                cert_node = sign.node('cert')
+
+                if not key_node:
+                    raise FinetuningException('key needed for signing')
+
+                if not cert_node:
+                    raise FinetuningException('cert needed for signing')
+
+                key_path = os.path.join(builddir, key_node.et.text) if key_node else ''
+                cert_path = os.path.join(builddir, cert_node.et.text) if cert_node else ''
+
+                if key_path and cert_path:
+                    cmd += ['-k', f'CMS,{key_path},{cert_path}']
+
+            cmd.append('create')
+            do(cmd)
+
+        target.images.append(out)
+        target.image_packers[out] = packers['none']
 
 
 @_register_action('extract_partition')

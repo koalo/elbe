@@ -1,0 +1,120 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+SPDX-FileCopyrightText: Linutronix GmbH
+-->
+<ns0:RootFileSystem xmlns:ns0="https://www.linutronix.de/projects/Elbe"
+			xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+			created="2009-05-20T08:50:56" revision="6"
+			xsi:schemaLocation="https://www.linutronix.de/projects/Elbe dbsfed.xsd">
+
+	<project>
+		<name>simple-validation-image-swupdate</name>
+		<version>1.0</version>
+		<suite>trixie</suite>
+		<buildtype>aarch64</buildtype>
+
+		<description>
+			Image used to test ELBE swu generation feature
+		</description>
+
+		<mirror>
+			<primary_host>deb.debian.org</primary_host>
+			<primary_path>/debian</primary_path>
+			<primary_proto>http</primary_proto>
+			<primary_key>
+				-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+				mDMEY865UxYJKwYBBAHaRw8BAQdAd7Z0srwuhlB6JKFkcf4HU4SSS/xcRfwEQWzr
+				crf6AEq0SURlYmlhbiBTdGFibGUgUmVsZWFzZSBLZXkgKDEyL2Jvb2t3b3JtKSA8
+				ZGViaWFuLXJlbGVhc2VAbGlzdHMuZGViaWFuLm9yZz6IlgQTFggAPhYhBE1k/sEZ
+				wgKQZ9bnkfjSWFuHg9SBBQJjzrlTAhsDBQkPCZwABQsJCAcCBhUKCQgLAgQWAgMB
+				Ah4BAheAAAoJEPjSWFuHg9SBSgwBAP9qpeO5z1s5m4D4z3TcqDo1wez6DNya27QW
+				WoG/4oBsAQCEN8Z00DXagPHbwrvsY2t9BCsT+PgnSn9biobwX7bDDg==
+				=5NZE
+				-----END PGP PUBLIC KEY BLOCK-----
+			</primary_key>
+		</mirror>
+
+	</project>
+	<target>
+		<hostname>validation-image</hostname>
+		<domain>elbe-ci</domain>
+		<passwd_hashed>!invalid</passwd_hashed>
+		<console>ttyS0,115200</console>
+
+		<debootstrap>
+			<type>mmdebstrap</type>
+		</debootstrap>
+
+		<images>
+			<msdoshd>
+				<name>sdcard.img</name>
+				<size>5GiB</size>
+				<partition>
+					<size>8MiB</size>
+					<label>autoboot</label>
+					<bootable>true</bootable>
+				</partition>
+				<partition>
+					<size>256MB</size>
+					<label>firmware_a</label>
+					<export>firmware.img</export>
+				</partition>
+				<partition>
+					<size>256MB</size>
+					<label>firmware_b</label>
+				</partition>
+				<extended>
+					<size>remain</size>
+					<logical>
+						<label>rfs_a</label>
+						<size>2GiB</size>
+						<export>rfs.img</export>
+					</logical>
+					<logical>
+						<label>rfs_b</label>
+						<size>2GiB</size>
+					</logical>
+				</extended>
+			</msdoshd>
+		</images>
+		<fstab>
+			<bylabel>
+				<label>autoboot</label>
+				<mountpoint>/boot/autoboot</mountpoint>
+				<fs>
+					<type>vfat</type>
+				</fs>
+			</bylabel>
+			<bylabel>
+				<label>firmware_a</label>
+				<mountpoint>/boot/firmware</mountpoint>
+				<fs>
+					<type>vfat</type>
+				</fs>
+			</bylabel>
+			<bylabel>
+				<label>firmware_b</label>
+				<mountpoint>/boot/firmware_b</mountpoint>
+				<nofstab/>
+				<fs>
+					<type>vfat</type>
+				</fs>
+			</bylabel>
+			<bylabel>
+				<label>rfs_a</label>
+				<mountpoint>/</mountpoint>
+				<fs>
+					<type>ext4</type>
+					<tune2fs>-i 0</tune2fs>
+				</fs>
+			</bylabel>
+		</fstab>
+
+		<project-finetuning>
+			<swugenerator out="iglos-ce.swu">
+				<description>sw-description.in</description>
+			</swugenerator>
+		</project-finetuning>
+	</target>
+</ns0:RootFileSystem>
