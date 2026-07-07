@@ -297,7 +297,7 @@ def create_partition(
     return ppart
 
 
-def create_label(disk, part, ppart, fslabel, target, grub):
+def create_label(disk, part, ppart, fslabel, target, grub, img_files):
 
     entry = fslabel[part.text('label')]
     entry.set_geometry(ppart, disk)
@@ -330,6 +330,11 @@ def create_label(disk, part, ppart, fslabel, target, grub):
 
         dd({'if': part_image, 'of': entry.filename, 'bs': 512,
             'seek': entry.offset // 512, 'conv': 'notrunc'})
+
+        if part.has('export'):
+            export_path = os.path.join(target, part.text('export'))
+            do(['cp', part_image, export_path])
+            img_files.append(part.text('export'))
 
     return ppart
 
@@ -370,7 +375,8 @@ def create_logical_partitions(disk,
                               epart,
                               fslabel,
                               target,
-                              grub):
+                              grub,
+                              img_files):
 
     current_sector = epart.geometry.start
     size_in_sectors = current_sector + epart.geometry.length
@@ -390,12 +396,12 @@ def create_logical_partitions(disk,
         if logical.has('binary'):
             create_binary(disk, logical, lpart, target)
         elif logical.has('label') and logical.text('label') in fslabel:
-            create_label(disk, logical, lpart, fslabel, target, grub)
+            create_label(disk, logical, lpart, fslabel, target, grub, img_files)
 
         current_sector += lpart.getLength()
 
 
-def do_image_hd(hd, fslabel, target, grub_version, grub_fw_type):
+def do_image_hd(hd, fslabel, target, grub_version, grub_fw_type, img_files):
 
     sector_size = 512
     s = size_to_int(hd.text('size'))
@@ -436,7 +442,7 @@ def do_image_hd(hd, fslabel, target, grub_version, grub_fw_type):
             if part.has('binary'):
                 create_binary(disk, part, ppart, target)
             elif part.text('label') in fslabel:
-                create_label(disk, part, ppart, fslabel, target, grub)
+                create_label(disk, part, ppart, fslabel, target, grub, img_files)
         elif part.tag == 'extended':
             ppart = create_partition(
                 disk,
@@ -446,7 +452,7 @@ def do_image_hd(hd, fslabel, target, grub_version, grub_fw_type):
                 size_in_sectors,
                 current_sector)
             create_logical_partitions(disk, part, ppart,
-                                      fslabel, target, grub)
+                                      fslabel, target, grub, img_files)
         else:
             continue
 
@@ -545,7 +551,8 @@ def do_hdimg(xml, target, rfs, grub_version, grub_fw_type):
                                   fslabel,
                                   target,
                                   grub_version,
-                                  grub_fw_type)
+                                  grub_fw_type,
+                                  img_files)
                 img_files.append(img)
 
             if i.tag == 'gpthd':
@@ -553,7 +560,8 @@ def do_hdimg(xml, target, rfs, grub_version, grub_fw_type):
                                   fslabel,
                                   target,
                                   grub_version,
-                                  grub_fw_type)
+                                  grub_fw_type,
+                                  img_files)
                 img_files.append(img)
 
             if i.tag == 'mtd':

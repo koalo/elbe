@@ -1977,6 +1977,17 @@ SPDX-FileCopyrightText: Linutronix GmbH
           </documentation>
         </annotation>
       </element>
+      <element name="export" type="rfs:string" minOccurs="0" maxOccurs="1">
+        <annotation>
+          <documentation>
+            If given, save this partition's built filesystem image as a
+            standalone file with this name in the project's build directory,
+            and register it as a build artifact. This is equivalent to using
+            extract_partition inside a project-finetuning/losetup block, but
+            does not require loop-mounting the finished disk image.
+          </documentation>
+        </annotation>
+      </element>
     </all>
     <attributeGroup ref="xml:specialAttrs"/>
   </complexType>
