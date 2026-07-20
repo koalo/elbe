@@ -248,7 +248,7 @@ class ElbeProject:
 
                 yield file
 
-    def build_sysroot(self):
+    def build_sysroot(self, exclude_initvm_pkgs=False):
 
         do(['rm', '-rf', self.sysrootpath])
         do(['mkdir', self.sysrootpath])
@@ -262,7 +262,8 @@ class ElbeProject:
         self.xml.add_target_package('libc6-dbg')
         self.xml.add_target_package('gdbserver')
 
-        self.install_packages(sysrootenv, buildenv=False)
+        self.install_packages(sysrootenv, buildenv=False,
+                              exclude_initvm_pkgs=exclude_initvm_pkgs)
 
         # ignore packages from debootstrap
         tpkgs = self.xml.get_target_packages()
@@ -387,7 +388,7 @@ class ElbeProject:
         host_sysrootenv.rfs.rmtree('/tmp')
         host_sysrootenv.rfs.rmtree('/var')
 
-    def build_sdk(self):
+    def build_sdk(self, exclude_initvm_pkgs=False):
         triplet = self.xml.defs['triplet']
         elfcode = self.xml.defs['elfcode']
 
@@ -406,7 +407,7 @@ class ElbeProject:
             host_pkglist.append('gdb-multiarch')
 
         # build target sysroot including libs and headers for the target
-        self.build_sysroot()
+        self.build_sysroot(exclude_initvm_pkgs=exclude_initvm_pkgs)
         sdktargetpath = os.path.join(self.sdkpath, 'sysroots', 'target')
         do(['mkdir', '-p', sdktargetpath])
         do(['tar', 'xJf', os.path.join(self.builddir, 'sysroot.tar.xz'), '-C', sdktargetpath],
@@ -468,7 +469,7 @@ class ElbeProject:
 
     def build_cdroms(self, build_bin=True,
                      build_sources=False, cdrom_size=None,
-                     tgt_pkg_lst=None):
+                     tgt_pkg_lst=None, exclude_initvm_pkgs=False):
 
         self.repo_images = []
 
@@ -501,7 +502,8 @@ class ElbeProject:
                                                     self.codename,
                                                     init_codename,
                                                     self.xml,
-                                                    self.builddir)
+                                                    self.builddir,
+                                                    exclude_initvm_pkgs=exclude_initvm_pkgs)
             if build_sources:
                 if not cdrom_size and self.xml.has('src-cdrom/size'):
                     cdrom_size = size_to_int(self.xml.text('src-cdrom/size'))
@@ -559,6 +561,7 @@ class ElbeProject:
                                                self.codename,
                                                init_codename,
                                                self.builddir,
+                                               exclude_initvm_pkgs=exclude_initvm_pkgs,
                                                **kwargs):
                         self.repo_images += iso
                 except SystemError as e:
@@ -566,7 +569,8 @@ class ElbeProject:
                     validation.error(str(e))
 
     def build(self, build_bin=False, build_sources=False, cdrom_size=None,
-              skip_pkglist=False, skip_pbuild=False, base_image_path=None):
+              skip_pkglist=False, skip_pbuild=False, base_image_path=None,
+              exclude_initvm_pkgs=False):
 
         # Write the log header
         self.write_log_header()
@@ -604,7 +608,7 @@ class ElbeProject:
 
         # Install packages
         if not skip_pkglist:
-            self.install_packages(self.buildenv)
+            self.install_packages(self.buildenv, exclude_initvm_pkgs=exclude_initvm_pkgs)
 
         try:
             self.buildenv.rfs.dump_elbeversion(self.xml)
@@ -641,7 +645,8 @@ class ElbeProject:
 
         # install packages for buildenv
         if not skip_pkglist:
-            self.install_packages(self.buildenv, buildenv=True)
+            self.install_packages(self.buildenv, buildenv=True,
+                                  exclude_initvm_pkgs=exclude_initvm_pkgs)
 
         # Write source.xml
         try:
@@ -688,7 +693,9 @@ class ElbeProject:
 
         self.targetfs.part_target(self.builddir, grub_version, grub_fw_type)
 
-        self.build_cdroms(build_bin, build_sources, cdrom_size, tgt_pkg_lst=tgt_pkgs)
+        self.build_cdroms(build_bin, build_sources, cdrom_size,
+                          tgt_pkg_lst=tgt_pkgs,
+                          exclude_initvm_pkgs=exclude_initvm_pkgs)
 
         if self.postbuild_file:
             logging.info('Postbuild script')
@@ -987,7 +994,7 @@ class ElbeProject:
             logging.exception('%s is available.  But it does not '
                               'contain an initvm node', source_path)
 
-    def install_packages(self, target, buildenv=False):
+    def install_packages(self, target, buildenv=False, exclude_initvm_pkgs=False):
 
         # to workaround debian bug no. 872543
         if self.xml.prj.has('noauth'):
@@ -1012,10 +1019,12 @@ class ElbeProject:
                 if target.need_dumpdebootstrap:
                     dump_debootstrappkgs(self.xml,
                                          self.get_rpcaptcache(env=target))
-                    dump_initvmpkgs(self.xml)
+                    if not exclude_initvm_pkgs:
+                        dump_initvmpkgs(self.xml)
                 target.need_dumpdebootstrap = False
 
-                self.copy_initvmnode()
+                if not exclude_initvm_pkgs:
+                    self.copy_initvmnode()
             else:
                 sourcepath = os.path.join(self.builddir, 'source.xml')
                 source = ElbeXML(sourcepath,
@@ -1026,9 +1035,10 @@ class ElbeProject:
                 try:
                     self.xml.get_initvmnode_from(source)
                 except NoInitvmNode:
-                    logging.warning('source.xml is available. '
-                                    'But it does not contain an initvm node')
-                    self.copy_initvmnode()
+                    if not exclude_initvm_pkgs:
+                        logging.warning('source.xml is available. '
+                                        'But it does not contain an initvm node')
+                        self.copy_initvmnode()
 
             # Seed /etc, we need /etc/hosts for hostname -f to work correctly
             if not buildenv:

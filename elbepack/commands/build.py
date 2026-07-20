@@ -17,6 +17,10 @@ from elbepack.localbuildaction import local_build_with_repodir_and_dl_result
     '--build-dir', dest='build_dir', type=os.path.abspath,
     help='directory where to save output files and the internal build cache '
          '(default is a timestamped directory in the current working directory)')
+@add_argument(
+    '--exclude-initvm-pkgs', action='store_true', dest='exclude_initvm_pkgs',
+    default=True,
+    help='Exclude initvm packages from CDROM generation (default for build command)')
 @add_argument('input', metavar='<xmlfile> | <isoimage>')
 def _build(args):
     if args.build_dir is None:
