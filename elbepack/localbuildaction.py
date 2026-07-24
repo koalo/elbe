@@ -11,6 +11,7 @@ import time
 from elbepack.cli import CliError, with_cli_details
 from elbepack.projectmanager import ProjectManager
 from elbepack.repodir import Repodir, RepodirError
+from elbepack.rootcheck import check_rootful_requirements
 from elbepack.xmlpreprocess import preprocess_file
 
 prog = os.path.basename(sys.argv[0])
@@ -53,6 +54,7 @@ def _local_build_and_dl_result(xmlfile, cdrom, base_image, args):
     try:
         with preprocess_file(xmlfile, variants=args.variants, sshport=args.sshport,
                              soapport=args.soapport) as xmlfile:
+            check_rootful_requirements(xmlfile)
             prjdir = pm.create_project(xmlfile)
 
         if args.writeproject:
