@@ -9,7 +9,6 @@ import textwrap
 import time
 
 from elbepack.cli import CliError, with_cli_details
-from elbepack.loopcheck import check_loop_mount_requirements
 from elbepack.projectmanager import ProjectManager
 from elbepack.repodir import Repodir, RepodirError
 from elbepack.xmlpreprocess import preprocess_file
