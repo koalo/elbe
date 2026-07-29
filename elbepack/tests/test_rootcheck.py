@@ -53,6 +53,19 @@ def test_needs_rootful_for_fs_finetuning(command_tag):
     assert 'rootfs' in reasons[0]
 
 
+def test_needs_no_rootful_for_fs_finetuning_file_command():
+    xml = _xml("""
+        <xml><target><fstab><bylabel>
+            <label>rootfs</label>
+            <fs>
+                <type>ext4</type>
+                <fs-finetuning><file-command>echo hi</file-command></fs-finetuning>
+            </fs>
+        </bylabel></fstab></target></xml>
+    """)
+    assert xml_needs_rootful(xml) == []
+
+
 @pytest.mark.parametrize('child_xml', [
     '<copy_from_partition part="1" artifact="a">out.bin</copy_from_partition>',
     '<copy_to_partition part="1" artifact="a">in.bin</copy_to_partition>',
