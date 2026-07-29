@@ -73,6 +73,7 @@ def test_needs_no_rootful_for_some_losetups():
             <losetup img="disk.img">
                 <extract_partition part="1">out.img</extract_partition>
                 <set_partition_type part="2">83</set_partition_type>
+                <insert_partition part="3">in.img</insert_partition>
             </losetup>
         </project-finetuning></target></xml>
     """)

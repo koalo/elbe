@@ -580,6 +580,27 @@ class ExtractPartitionAction(ImageFinetuningAction):
         target.image_packers[self.node.et.text] = default_packer
 
 
+@_register_action('insert_partition')
+class InsertPartitionAction(ImageFinetuningAction):
+
+    def execute(self, _buildenv, _target):
+        raise NotImplementedError('<insert_partition> may only be '
+                                  'used in <losetup>')
+
+    def execute_img(self, _buildenv, _target, builddir, *, device=None, image=None):
+        part_nr = self.node.et.attrib['part']
+        srcname = os.path.join(builddir, self.node.et.text)
+
+        if device is not None:
+            do(['dd', f'if={srcname}', f'of={device}p{part_nr}'])
+        elif image is not None:
+            start_sector, _size_sectors, sectorsize = _get_partition_info(image, part_nr)
+            do(['dd', f'if={srcname}', f'of={image}',
+                f'bs={sectorsize}', f'seek={start_sector}', 'conv=notrunc'])
+        else:
+            raise ValueError('Must pass either device or image')
+
+
 @_register_action('copy_from_partition')
 class CopyFromPartition(ImageFinetuningAction):
 
