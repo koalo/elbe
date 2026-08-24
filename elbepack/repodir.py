@@ -18,6 +18,9 @@ class RepodirError(Exception):
     pass
 
 
+XML_NS_BASE = '{http://www.w3.org/XML/1998/namespace}base'
+
+
 def preprocess_repodir(xml, xmldir):
     """Replaces each <repodir>, which points to a directory containing a Debian
        repository, with a valid <url> element.
@@ -87,6 +90,10 @@ class Repodir:
             xml.xinclude()
 
             self.httpds = preprocess_repodir(xml, os.path.dirname(self.input))
+
+            root = xml.getroot()
+            if root.get(XML_NS_BASE) is None:
+                root.set(XML_NS_BASE, os.path.abspath(self.input))
 
             xml.write(
                 self.output,

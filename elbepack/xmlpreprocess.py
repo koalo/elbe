@@ -24,6 +24,7 @@ with warnings.catch_warnings():
 
 from elbepack.archivedir import ArchivedirError, combinearchivedir
 from elbepack.isooptions import iso_option_valid
+from elbepack.repodir import XML_NS_BASE
 from elbepack.treeutils import create_xml_parser, dbsfed_schema, xml_bool
 from elbepack.validate import error_log_to_strings
 
@@ -346,7 +347,7 @@ def xmlpreprocess(xml_input_file, xml_output_file, *,
         xml = etree.parse(xml_input_file, parser=parser)
         xml.xinclude()
 
-        basedir = pathlib.Path(xml_input_file).parent
+        basedir = pathlib.Path(xml.getroot().base).parent
 
         # Variant management
         # check all nodes for variant field, and act accordingly.
@@ -417,6 +418,8 @@ def xmlpreprocess(xml_input_file, xml_output_file, *,
         preprocess_pkg_pinning(xml)
 
         preprocess_check_script(xml, basedir)
+
+        xml.getroot().attrib.pop(XML_NS_BASE, None)
 
         if schema.validate(xml):
             # if validation succedes write xml file
