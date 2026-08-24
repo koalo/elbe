@@ -138,9 +138,14 @@ def test_pbuilder_build(initvm, xml, tmp_path, request):
 
     assert _prjrepo_list_packages(uuid) == ''
 
-    for package in ['libgpio', 'gpiotest']:
-        subprocess.run(['git', 'clone', f'https://github.com/Linutronix/{package}.git'],
-                       check=True, cwd=build_dir)
+    # Temporarily point to my bugfix branch
+    repos = {
+        'libgpio': ['https://github.com/Linutronix/libgpio.git'],
+        'gpiotest': ['https://github.com/koalo/gpiotest.git',
+                     '-b', 'devel/koalo/fixlinking'],
+    }
+    for package, clone_args in repos.items():
+        subprocess.run(['git', 'clone', *clone_args], check=True, cwd=build_dir)
         run_elbe_subcommand(['pbuilder', 'build', '--project', uuid,
                              '--source', build_dir.joinpath(package),
                              '--output', build_dir.joinpath('out')])
