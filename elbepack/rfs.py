@@ -364,12 +364,29 @@ class BuildEnv:
         make_writable_by_apt(self.rfs.fname('var/cache/apt/archives/partial'),
                              passwd_root=self.rfs.path)
 
+    def _get_root_shadow_passwd(self):
+        try:
+            shadow = self.rfs.read_file('etc/shadow')
+        except OSError:
+            return None
+        for line in shadow.splitlines():
+            fields = line.split(':')
+            if fields and fields[0] == 'root' and len(fields) > 1:
+                return fields[1]
+        return None
+
     def seed_etc(self):
         if self.xml.has('target/passwd_hashed'):
             passwd = self.xml.text('target/passwd_hashed')
         else:
-            passwd = '!'
-        chroot(self.rfs.path, ['chpasswd', '--encrypted'], input=b'root:' + passwd.encode('ascii'))
+            current = self._get_root_shadow_passwd()
+            if current and current != '*' and not current.startswith('!'):
+                passwd = None
+            else:
+                passwd = '!'
+        if passwd is not None:
+            chroot(self.rfs.path, ['chpasswd', '--encrypted'],
+                   input=b'root:' + passwd.encode('ascii'))
 
         hostname = self.xml.text('target/hostname')
         fqdn = hostname
