@@ -382,6 +382,24 @@ class BuildEnv:
                 return fields[1]
         return None
 
+    def _get_current_hostname(self):
+        try:
+            return self.rfs.read_file('etc/hostname').strip()
+        except OSError:
+            return None
+
+    def _get_current_domain(self, old_hostname):
+        if self.fresh_debootstrap or not old_hostname:
+            return None
+        try:
+            mailname = self.rfs.read_file('etc/mailname').strip()
+        except OSError:
+            return None
+        prefix = old_hostname + '.'
+        if mailname.startswith(prefix):
+            return mailname[len(prefix):]
+        return None
+
     def seed_etc(self):
         if self.xml.has('target/passwd_hashed'):
             passwd = self.xml.text('target/passwd_hashed')
@@ -395,10 +413,24 @@ class BuildEnv:
             chroot(self.rfs.path, ['chpasswd', '--encrypted'],
                    input=b'root:' + passwd.encode('ascii'))
 
-        hostname = self.xml.text('target/hostname')
-        fqdn = hostname
+        old_hostname = self._get_current_hostname()
+
+        if self.xml.has('target/hostname'):
+            hostname = self.xml.text('target/hostname')
+        else:
+            if self.fresh_debootstrap or not old_hostname:
+                raise Exception('XML specifies no hostname, and no hostname from a reused '
+                                'base system exists in the rootfs')
+            hostname = old_hostname
+
         if self.xml.has('target/domain'):
-            fqdn = (f"{hostname}.{self.xml.text('target/domain')}")
+            domain = self.xml.text('target/domain')
+        else:
+            domain = self._get_current_domain(old_hostname)
+
+        fqdn = hostname
+        if domain:
+            fqdn = f'{hostname}.{domain}'
 
         self.rfs.append_file('/etc/hosts',
                              '\n127.0.0.1 localhost'

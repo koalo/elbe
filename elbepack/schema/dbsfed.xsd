@@ -1004,7 +1004,7 @@ SPDX-FileCopyrightText: Linutronix GmbH
       </documentation>
     </annotation>
     <all>
-      <element name="hostname" type="rfs:string" minOccurs="1" maxOccurs="1">
+      <element name="hostname" type="rfs:string" minOccurs="0" maxOccurs="1">
         <annotation>
           <documentation>
             hostname of the system
