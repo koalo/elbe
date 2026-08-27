@@ -347,13 +347,20 @@ class BuildEnv:
                     self.add_key(unarmor_openpgp_keyring(key), f'elbe-xml-raw-key{i}.gpg')
 
     def initialize_dirs(self, build_sources=False):
-        mirror = self.xml.create_apt_sources_list(build_sources=build_sources,
-                                                  hostsysroot=self.hostsysroot)
+        if self.xml.has('project/mirror'):
+            mirror = self.xml.create_apt_sources_list(build_sources=build_sources,
+                                                      hostsysroot=self.hostsysroot)
 
-        if self.rfs.lexists('etc/apt/sources.list'):
-            self.rfs.remove('etc/apt/sources.list')
+            if self.rfs.lexists('etc/apt/sources.list'):
+                self.rfs.remove('etc/apt/sources.list')
 
-        self.rfs.write_file('etc/apt/sources.list', 0o644, mirror)
+            self.rfs.write_file('etc/apt/sources.list', 0o644, mirror)
+        elif not self.fresh_debootstrap and self.rfs.lexists('etc/apt/sources.list'):
+            # keep existing /etc/apt/sources.list
+            pass
+        else:
+            raise Exception('XML specifies no mirror, and no sources.list from a reused '
+                            'base system exists in the rootfs')
 
         preseed = get_preseed(self.xml)
         preseed_txt = preseed_to_text(preseed)

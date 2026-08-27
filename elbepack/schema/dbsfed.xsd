@@ -503,7 +503,7 @@ SPDX-FileCopyrightText: Linutronix GmbH
           </documentation>
         </annotation>
       </element>
-      <element name="mirror" type="rfs:mirror">
+      <element name="mirror" type="rfs:mirror" minOccurs="0">
         <annotation>
           <documentation>
             used debian mirrors
