@@ -104,6 +104,7 @@ class AndroidSparsePacker(Packer):
 
 packers = {'none': NoPacker(),
            'gzip': InPlacePacker(['gzip', '-f'], '.gz'),
+           'xz': InPlacePacker(['xz', '-f', '-T0'], '.xz'),
            'zstd': InPlacePacker(['zstd', '-T0'], '.zst'),
            'tar':  TarArchiver('--auto-compress', '.tar'),
            'tarxz': TarArchiver('--use-compress-program=xz -T0 -M40%', '.tar.xz'),
