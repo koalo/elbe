@@ -25,6 +25,7 @@ from elbepack.aptprogress import (
     ElbeOpProgress,
 )
 from elbepack.log import async_logging
+from elbepack.timing import phase
 
 
 class MyMan(BaseManager):
@@ -219,22 +220,25 @@ class RPCAPTCache(InChRootObject):
 
     @_with_pseudo_filesystems
     def update(self):
-        self.cache.update(fetch_progress=ElbeAcquireProgress())
-        self.cache.open(progress=ElbeOpProgress())
+        with phase('elbe.apt.update'):
+            self.cache.update(fetch_progress=ElbeAcquireProgress())
+            self.cache.open(progress=ElbeOpProgress())
 
     @_with_pseudo_filesystems
     def fetch_archives(self):
         print('Fetching packages...')
-        self.cache.fetch_archives(ElbeAcquireProgress())
+        with phase('elbe.apt.fetch_archives'):
+            self.cache.fetch_archives(ElbeAcquireProgress())
 
     @_with_pseudo_filesystems
     def commit(self):
         os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
         os.environ['DEBONF_NONINTERACTIVE_SEEN'] = 'true'
         print('Commiting changes ...')
-        self.cache.commit(ElbeAcquireProgress(),
-                          ElbeInstallProgress(fileno=sys.stdout.fileno()))
-        self.cache.open(progress=ElbeOpProgress())
+        with phase('elbe.apt.commit'):
+            self.cache.commit(ElbeAcquireProgress(),
+                              ElbeInstallProgress(fileno=sys.stdout.fileno()))
+            self.cache.open(progress=ElbeOpProgress())
 
     def get_dependencies(self, pkgname):
         deps = getalldeps(self.cache, pkgname)

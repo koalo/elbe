@@ -43,6 +43,7 @@ from elbepack.rfs import BuildEnv
 from elbepack.rpcaptcache import get_rpcaptcache
 from elbepack.shellhelper import chroot, do
 from elbepack.templates import write_pack_template
+from elbepack.timing import phase
 from elbepack.version import elbe_version
 
 
@@ -583,13 +584,15 @@ class ElbeProject:
         # so it gets rebuilt properly.
         if not self.has_full_buildenv():
             do(['mkdir', '-p', self.chrootpath])
-            self.buildenv = BuildEnv(self.xml, self.chrootpath,
-                                     build_sources=build_sources, clean=True,
-                                     base_image_path=base_image_path)
+            with phase('elbe.build.buildenv_create'):
+                self.buildenv = BuildEnv(self.xml, self.chrootpath,
+                                         build_sources=build_sources, clean=True,
+                                         base_image_path=base_image_path)
             skip_pkglist = False
 
         # Import keyring
-        self.buildenv.import_keys()
+        with phase('elbe.build.import_keys'):
+            self.buildenv.import_keys()
         logging.info('Keys imported')
 
         if self.xml.has('target/pbuilder') and not skip_pbuild:
@@ -606,11 +609,13 @@ class ElbeProject:
         # To avoid update cache errors, the project repo needs to have
         # Release and Packages files, even if it's empty. So don't do this
         # in the if case above!
-        self.repo.finalize()
+        with phase('elbe.build.repo_finalize'):
+            self.repo.finalize()
 
         # Install packages
         if not skip_pkglist:
-            self.install_packages(self.buildenv, exclude_initvm_pkgs=exclude_initvm_pkgs)
+            with phase('elbe.build.install_packages.target'):
+                self.install_packages(self.buildenv, exclude_initvm_pkgs=exclude_initvm_pkgs)
 
         try:
             self.buildenv.rfs.dump_elbeversion(self.xml)
@@ -622,18 +627,20 @@ class ElbeProject:
         self.targetfs = TargetFs(self.targetpath, self.buildenv.xml,
                                  clean=True)
         os.chdir(self.buildenv.rfs.fname(''))
-        extract_target(self.buildenv.rfs, self.xml, self.targetfs,
-                       self.get_rpcaptcache())
+        with phase('elbe.build.extract_target'):
+            extract_target(self.buildenv.rfs, self.xml, self.targetfs,
+                           self.get_rpcaptcache())
 
         # Package validation and package list
         if not skip_pkglist:
-            pkgs = self.xml.xml.node('/target/pkg-list')
-            if self.xml.has('fullpkgs'):
-                check_full_pkgs(pkgs, self.xml.xml.node('/fullpkgs'),
-                                self.get_rpcaptcache())
-            else:
-                check_full_pkgs(pkgs, None, self.get_rpcaptcache())
-            dump_fullpkgs(self.xml, self.buildenv.rfs, self.get_rpcaptcache())
+            with phase('elbe.build.check_full_pkgs'):
+                pkgs = self.xml.xml.node('/target/pkg-list')
+                if self.xml.has('fullpkgs'):
+                    check_full_pkgs(pkgs, self.xml.xml.node('/fullpkgs'),
+                                    self.get_rpcaptcache())
+                else:
+                    check_full_pkgs(pkgs, None, self.get_rpcaptcache())
+                dump_fullpkgs(self.xml, self.buildenv.rfs, self.get_rpcaptcache())
 
             self.xml.dump_elbe_version()
 
@@ -647,8 +654,9 @@ class ElbeProject:
 
         # install packages for buildenv
         if not skip_pkglist:
-            self.install_packages(self.buildenv, buildenv=True,
-                                  exclude_initvm_pkgs=exclude_initvm_pkgs)
+            with phase('elbe.build.install_packages.buildenv'):
+                self.install_packages(self.buildenv, buildenv=True,
+                                      exclude_initvm_pkgs=exclude_initvm_pkgs)
 
         # Write source.xml
         try:
@@ -662,10 +670,12 @@ class ElbeProject:
         tgt_pkgs = elbe_report(self.xml, self.buildenv, cache, self.targetfs, self.builddir)
 
         # chroot' licenses
-        self.gen_licenses('chroot', self.buildenv,
-                          [p.name for p in cache.get_installed_pkgs()])
+        with phase('elbe.build.gen_licenses.chroot'):
+            self.gen_licenses('chroot', self.buildenv,
+                              [p.name for p in cache.get_installed_pkgs()])
 
-        self.gen_licenses('target', self.buildenv, tgt_pkgs)
+        with phase('elbe.build.gen_licenses.target'):
+            self.gen_licenses('target', self.buildenv, tgt_pkgs)
 
         # Use some handwaving to determine grub version
         grub_arch = 'ia32' if self.arch == 'i386' else self.arch
@@ -693,11 +703,13 @@ class ElbeProject:
                             'are installed, skipping grub',
                             grub_arch)
 
-        self.targetfs.part_target(self.builddir, grub_version, grub_fw_type)
+        with phase('elbe.build.part_target'):
+            self.targetfs.part_target(self.builddir, grub_version, grub_fw_type)
 
-        self.build_cdroms(build_bin, build_sources, cdrom_size,
-                          tgt_pkg_lst=tgt_pkgs,
-                          exclude_initvm_pkgs=exclude_initvm_pkgs)
+        with phase('elbe.build.build_cdroms'):
+            self.build_cdroms(build_bin, build_sources, cdrom_size,
+                              tgt_pkg_lst=tgt_pkgs,
+                              exclude_initvm_pkgs=exclude_initvm_pkgs)
 
         if self.postbuild_file:
             logging.info('Postbuild script')
@@ -705,12 +717,14 @@ class ElbeProject:
                 self.xml.text('project/version'), self.xml.text('project/name')],
                check=False)
 
-        do_prj_finetuning(self.xml,
-                          self.buildenv,
-                          self.targetfs,
-                          self.builddir)
+        with phase('elbe.build.do_prj_finetuning'):
+            do_prj_finetuning(self.xml,
+                              self.buildenv,
+                              self.targetfs,
+                              self.builddir)
 
-        self.targetfs.pack_images(self.builddir)
+        with phase('elbe.build.pack_images'):
+            self.targetfs.pack_images(self.builddir)
 
         if os.path.exists(self.validationpath):
             with open(self.validationpath) as f:

@@ -6,10 +6,12 @@
 import contextlib
 import logging
 import os
+import pathlib
 import shlex
 import subprocess
 
 from elbepack.log import async_logging_ctx
+from elbepack.timing import phase
 
 
 """
@@ -69,13 +71,17 @@ def run(cmd, /, *, check=True, log_cmd=None, **kwargs):
 
     >>> from elbepack.log import open_logging
     >>> cleanup = open_logging(streams=sys.stdout)
-    >>> run(['echo', 'ELBE'], stdout=ELBE_LOGGING)
+    >>> run(['echo', 'ELBE'], stdout=ELBE_LOGGING) # doctest: +ELLIPSIS
     [CMD] echo ELBE
+    [TIMING] ELBE-TIMING ph=B ts=... pid=... tid=... name=elbe.shell.echo
     ELBE
+    [TIMING] ELBE-TIMING ph=E ts=... pid=... tid=... name=elbe.shell.echo
     ELBE
     CompletedProcess(args=['echo', 'ELBE'], returncode=0)
 
-    >>> run(['echo', 'ELBE'], capture_output=True)
+    >>> run(['echo', 'ELBE'], capture_output=True) # doctest: +ELLIPSIS
+    [TIMING] ELBE-TIMING ph=B ts=... pid=... tid=... name=elbe.shell.echo
+    [TIMING] ELBE-TIMING ph=E ts=... pid=... tid=... name=elbe.shell.echo
     CompletedProcess(args=['echo', 'ELBE'], returncode=0, stdout=b'ELBE\\n', stderr=b'')
     >>> cleanup()
     """
@@ -92,7 +98,9 @@ def run(cmd, /, *, check=True, log_cmd=None, **kwargs):
 
             logging.info(log_cmd or _log_cmd(cmd), extra={'context': '[CMD] '})
 
-        return subprocess.run(cmd, stdout=stdout, stderr=stderr, check=check, **kwargs)
+        cmd_name = cmd.split()[0] if _is_shell_cmd(cmd) else os.fspath(cmd[0])
+        with phase(f'elbe.shell.{pathlib.Path(cmd_name).name}'):
+            return subprocess.run(cmd, stdout=stdout, stderr=stderr, check=check, **kwargs)
 
 
 def do(cmd, /, *, env_add=None, **kwargs):
@@ -106,14 +114,20 @@ def do(cmd, /, *, env_add=None, **kwargs):
     >>> import sys
     >>> from elbepack.log import open_logging
     >>> cleanup = open_logging(streams=sys.stdout)
-    >>> do("true")
+    >>> do("true") # doctest: +ELLIPSIS
     [CMD] true
+    [TIMING] ELBE-TIMING ph=B ts=... pid=... tid=... name=elbe.shell.true
+    [TIMING] ELBE-TIMING ph=E ts=... pid=... tid=... name=elbe.shell.true
 
-    >>> do("false", check=False)
+    >>> do("false", check=False) # doctest: +ELLIPSIS
     [CMD] false
+    [TIMING] ELBE-TIMING ph=B ts=... pid=... tid=... name=elbe.shell.false
+    [TIMING] ELBE-TIMING ph=E ts=... pid=... tid=... name=elbe.shell.false
 
-    >>> do("cat -", input=b"ELBE")
+    >>> do("cat -", input=b"ELBE") # doctest: +ELLIPSIS
     [CMD] cat -
+    [TIMING] ELBE-TIMING ph=B ts=... pid=... tid=... name=elbe.shell.cat
+    [TIMING] ELBE-TIMING ph=E ts=... pid=... tid=... name=elbe.shell.cat
 
     >>> do("cat - && false", input=b"ELBE") # doctest: +ELLIPSIS
     Traceback (most recent call last):
