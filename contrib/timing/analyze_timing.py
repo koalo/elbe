@@ -16,17 +16,26 @@ then:
 
     analyze_timing.py --summary /tmp/safelog-build.log
     analyze_timing.py --trace /tmp/trace.json /tmp/safelog-build.log
+    analyze_timing.py --flamegraph /tmp/flame.html /tmp/safelog-build.log
 
-Load the resulting trace.json at https://ui.perfetto.dev for a flamegraph.
-Multiple log files may be given at once (e.g. the captured combined output
-plus a project's log.txt found under a build dir); events from all of them
-are merged and sorted by timestamp before analysis.
+Load the resulting trace.json at https://ui.perfetto.dev for a trace view,
+or just open flame.html directly in any browser -- it's a single
+self-contained file (inline SVG, no JS/CSS/fonts fetched from anywhere),
+so it works with no network access at all. Multiple log files may be given
+at once (e.g. the captured combined output plus a project's log.txt found
+under a build dir); events from all of them are merged and sorted by
+timestamp before analysis. Events that are exact repeats of one another
+(elbe logs each phase through multiple handlers, see parse_events()) are
+deduplicated automatically, so passing overlapping/redundant log files is
+safe and does not inflate the resulting counts/totals.
 """
 
 import argparse
+import html
 import json
 import re
 import sys
+import zlib
 from collections import defaultdict
 
 _LINE_RE = re.compile(
@@ -36,18 +45,35 @@ _LINE_RE = re.compile(
 
 
 def parse_events(paths):
+    """Parse ELBE-TIMING lines from one or more log files into an event list.
+
+    elbe emits each phase through more than one logging handler (a root
+    'INFO:root:...' handler plus a dedicated '[TIMING] ...' handler), and
+    for phases from the SOAP apt-worker subprocess (elbe.apt.*), the
+    subprocess's own already-doubled output is captured and relayed
+    through a further 'soap' logger on top of that -- so the exact same
+    real event can appear several times verbatim (just wrapped in
+    different prefixes) in a captured build log. Such repeats are
+    deduplicated on the (ph, ts, pid, tid, name) tuple before being
+    returned, so callers never see inflated counts/totals from this.
+    """
     events = []
+    seen = set()
     for path in paths:
         with open(path, encoding='utf-8', errors='replace') as f:
             for line in f:
                 m = _LINE_RE.search(line)
                 if m:
+                    key = (
+                        m.group('ph'), int(m.group('ts')), int(m.group('pid')),
+                        int(m.group('tid')), m.group('name'),
+                    )
+                    if key in seen:
+                        continue
+                    seen.add(key)
                     events.append({
-                        'ph': m.group('ph'),
-                        'ts': int(m.group('ts')),
-                        'pid': int(m.group('pid')),
-                        'tid': int(m.group('tid')),
-                        'name': m.group('name'),
+                        'ph': key[0], 'ts': key[1], 'pid': key[2],
+                        'tid': key[3], 'name': key[4],
                     })
     events.sort(key=lambda e: e['ts'])
     return events
@@ -161,6 +187,160 @@ def to_trace_events(forest):
     return trace_events
 
 
+def _phase_color(name):
+    # Deterministic (not Python's salted hash()) so the same phase name
+    # always gets the same color across runs/files.
+    hue = zlib.crc32(name.encode()) % 360
+    return f'hsl({hue}, 55%, 55%)'
+
+
+def _assign_depths(node, depth, out):
+    out.append((node, depth))
+    for child in node['children']:
+        _assign_depths(child, depth + 1, out)
+
+
+_NICE_TIME_STEPS_S = [
+    0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5,
+    1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600,
+]
+
+
+def _pick_time_step_s(total_s, target_ticks=12):
+    if total_s <= 0:
+        return _NICE_TIME_STEPS_S[0]
+    raw = total_s / target_ticks
+    for step in _NICE_TIME_STEPS_S:
+        if step >= raw:
+            return step
+    return _NICE_TIME_STEPS_S[-1]
+
+
+_FLAMEGRAPH_STYLE = """
+body { font: 13px sans-serif; margin: 16px; background: #fff; color: #111; }
+h1 { font-size: 16px; margin: 0 0 4px; }
+.subtitle { color: #555; margin: 0 0 16px; }
+.scroll { overflow-x: auto; border: 1px solid #ddd; }
+.lane-label { font: bold 11px sans-serif; fill: #333; }
+.tick-label { font: 10px sans-serif; fill: #777; }
+.tick-line { stroke: #eee; stroke-width: 1; }
+rect.span { stroke: #fff; stroke-width: 0.5; }
+rect.span:hover { stroke: #000; stroke-width: 1.5; }
+text.span-label { font: 10px monospace; fill: #111; pointer-events: none; }
+"""
+
+
+def to_flamegraph_html(forest, *, width=1600, row_height=20):
+    """Render a self-contained flame-chart HTML page (inline SVG, no
+    external JS/CSS/fonts) -- open the file directly in any browser, no
+    network access needed.
+
+    Unlike a classic sampled-profiler flame graph, spans carry real
+    timestamps and span multiple processes/threads, so this renders as a
+    flame *chart*: the x-axis is wall-clock time (shared across all
+    lanes), and each (pid, tid) gets its own horizontal lane in which
+    nested calls stack upward from that lane's own top-level spans --
+    matching build_forest()'s per-(pid, tid) nesting (see its docstring).
+    """
+    ended = [n for n in _walk(forest) if n['end'] is not None]
+    if not ended:
+        return (
+            '<!doctype html><meta charset="utf-8">'
+            '<title>ELBE timing flamegraph</title><body>no completed spans to show</body>'
+        )
+
+    min_ts = min(n['begin'] for n in ended)
+    max_ts = max(n['end'] for n in ended)
+    total_us = max(max_ts - min_ts, 1)
+    scale = width / total_us  # pixels per microsecond
+
+    lanes = defaultdict(list)
+    for node in forest:
+        if node['end'] is not None:
+            lanes[(node['pid'], node['tid'])].append(node)
+    lane_keys = sorted(lanes, key=lambda k: min(n['begin'] for n in lanes[k]))
+
+    ruler_h = 24
+    lane_header_h = 18
+    lane_gap = 6
+
+    body_parts = [
+        f'<g transform="translate(0, {ruler_h})">',
+    ]
+
+    total_step_s = _pick_time_step_s(total_us / 1e6)
+    tick_us = total_step_s * 1e6
+    tick = 0.0
+    ruler_parts = []
+    while tick <= total_us:
+        x = tick * scale
+        ruler_parts.append(
+            f'<line class="tick-line" x1="{x:.2f}" y1="0" x2="{x:.2f}" '
+            f'y2="{ruler_h}" />'
+            f'<text class="tick-label" x="{x + 2:.2f}" y="{ruler_h - 8:.2f}">'
+            f'{tick / 1e6:.3g}s</text>'
+        )
+        tick += tick_us
+
+    y = 0
+    for key in lane_keys:
+        entries = []
+        for root in lanes[key]:
+            _assign_depths(root, 0, entries)
+        max_depth = max(depth for _, depth in entries)
+        lane_h = (max_depth + 1) * row_height
+
+        body_parts.append(
+            f'<text class="lane-label" x="4" y="{y + lane_header_h - 5:.2f}">'
+            f'pid {key[0]} · tid {key[1]}</text>'
+        )
+        y += lane_header_h
+
+        for node, depth in entries:
+            x = (node['begin'] - min_ts) * scale
+            w = max((node['end'] - node['begin']) * scale, 0.5)
+            ry = y + depth * row_height
+            dur_s = (node['end'] - node['begin']) / 1e6
+            name = node['name']
+            max_chars = max(int(w // 6) - 1, 0)
+            label = name if len(name) <= max_chars else name[:max_chars - 1] + '…'
+            body_parts.append(
+                '<g>'
+                f'<rect class="span" x="{x:.2f}" y="{ry:.2f}" width="{w:.2f}" '
+                f'height="{row_height - 1}" fill="{_phase_color(name)}">'
+                f'<title>{html.escape(name)}\n{dur_s:.3f}s</title></rect>'
+                + (
+                    f'<text class="span-label" x="{x + 2:.2f}" y="{ry + row_height - 6:.2f}">'
+                    f'{html.escape(label)}</text>' if max_chars > 2 else ''
+                )
+                + '</g>'
+            )
+
+        y += lane_h + lane_gap
+
+    body_parts.append('</g>')
+    svg_height = ruler_h + y
+
+    total_s = total_us / 1e6
+    span_count = len(ended)
+    lane_count = len(lane_keys)
+
+    return f"""<!doctype html>
+<meta charset="utf-8">
+<title>ELBE timing flamegraph</title>
+<style>{_FLAMEGRAPH_STYLE}</style>
+<h1>ELBE build timing flamegraph</h1>
+<p class="subtitle">total wall time {total_s:.3f}s · {span_count} spans · \
+{lane_count} process/thread lanes · hover a bar for its exact duration</p>
+<div class="scroll">
+<svg width="{width}" height="{svg_height:.2f}" viewBox="0 0 {width} {svg_height:.2f}">
+{''.join(ruler_parts)}
+{''.join(body_parts)}
+</svg>
+</div>
+"""
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -170,10 +350,12 @@ def main(argv=None):
                         help='print a text summary table sorted by total duration')
     parser.add_argument('--trace', metavar='OUT.json',
                         help='write a Chrome/Perfetto Trace Event Format JSON file')
+    parser.add_argument('--flamegraph', metavar='OUT.html',
+                        help='write a self-contained flame-chart HTML file (no network needed)')
     args = parser.parse_args(argv)
 
-    if not args.summary and not args.trace:
-        parser.error('nothing to do: pass --summary and/or --trace')
+    if not args.summary and not args.trace and not args.flamegraph:
+        parser.error('nothing to do: pass --summary, --trace and/or --flamegraph')
 
     events = parse_events(args.logfiles)
     if not events:
@@ -193,6 +375,11 @@ def main(argv=None):
         with open(args.trace, 'w', encoding='utf-8') as f:
             json.dump({'traceEvents': to_trace_events(forest)}, f)
         print(f'wrote {args.trace}', file=sys.stderr)
+
+    if args.flamegraph:
+        with open(args.flamegraph, 'w', encoding='utf-8') as f:
+            f.write(to_flamegraph_html(forest))
+        print(f'wrote {args.flamegraph}', file=sys.stderr)
 
 
 if __name__ == '__main__':

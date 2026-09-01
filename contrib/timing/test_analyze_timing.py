@@ -11,6 +11,8 @@ logic can be validated without ever running a real container build.
 """
 
 import json
+import re
+import xml.etree.ElementTree as ET
 
 import analyze_timing
 
@@ -62,6 +64,45 @@ def test_parse_events_merges_and_sorts_multiple_files(tmp_path):
     events = analyze_timing.parse_events([first, second])
     assert [e['ts'] for e in events] == sorted(e['ts'] for e in events)
     assert len(events) == 8
+
+
+# A real captured build log logs the same physical event several times
+# over, wrapped in different logger prefixes: elbe attaches both a root
+# 'INFO:root:...' handler and a dedicated '[TIMING] ...' handler, and for
+# SOAP apt-worker phases the worker's own already-doubled output gets
+# relayed and re-logged again under a 'soap' logger on top of that.
+DUPLICATE_PREFIXES_LOG = """\
+INFO:root:ELBE-TIMING ph=B ts=2000000 pid=7 tid=1 name=elbe.apt.commit
+[TIMING] ELBE-TIMING ph=B ts=2000000 pid=7 tid=1 name=elbe.apt.commit
+INFO:soap:INFO:root:ELBE-TIMING ph=B ts=2000000 pid=7 tid=1 name=elbe.apt.commit
+INFO:soap:INFO:root:ELBE-TIMING ph=E ts=2005000 pid=7 tid=1 name=elbe.apt.commit
+INFO:root:ELBE-TIMING ph=E ts=2005000 pid=7 tid=1 name=elbe.apt.commit
+[TIMING] ELBE-TIMING ph=E ts=2005000 pid=7 tid=1 name=elbe.apt.commit
+"""
+
+
+def test_parse_events_deduplicates_identical_events_from_multiple_handlers(tmp_path):
+    path = _write_fixture(tmp_path, 'dup.log', DUPLICATE_PREFIXES_LOG)
+    events = analyze_timing.parse_events([path])
+
+    assert len(events) == 2
+    assert [e['ph'] for e in events] == ['B', 'E']
+    assert all(e['name'] == 'elbe.apt.commit' for e in events)
+
+
+def test_parse_events_deduplicates_across_multiple_files(tmp_path):
+    # Mirrors combining a captured master log with a project's own log.txt
+    # under a build dir (see the module docstring) -- the same doubled
+    # event ends up split across two separate files on disk.
+    master = _write_fixture(tmp_path, 'master.log', DUPLICATE_PREFIXES_LOG)
+    inner = _write_fixture(
+        tmp_path, 'inner.log',
+        '[TIMING] ELBE-TIMING ph=B ts=2000000 pid=7 tid=1 name=elbe.apt.commit\n'
+        '[TIMING] ELBE-TIMING ph=E ts=2005000 pid=7 tid=1 name=elbe.apt.commit\n',
+    )
+
+    events = analyze_timing.parse_events([master, inner])
+    assert len(events) == 2
 
 
 def test_build_forest_nests_only_within_same_pid_tid(tmp_path):
@@ -153,6 +194,83 @@ def test_main_prints_summary(tmp_path, capsys):
     out = capsys.readouterr().out
     assert 'iglos.build' in out
     assert 'elbe.build.install_packages.target' in out
+
+
+def _svg_fragment(html_text):
+    m = re.search(r'<svg.*?</svg>', html_text, re.S)
+    assert m is not None, 'no <svg>...</svg> found in flame graph HTML'
+    return m.group(0)
+
+
+def test_flamegraph_html_is_self_contained(tmp_path):
+    events = analyze_timing.parse_events([_write_fixture(tmp_path)])
+    forest, _ = analyze_timing.build_forest(events)
+    html_text = analyze_timing.to_flamegraph_html(forest)
+
+    assert html_text.startswith('<!doctype html>')
+    for external in ('http://', 'https://', 'src=', '<script'):
+        assert external not in html_text
+
+
+def test_flamegraph_html_contains_well_formed_svg(tmp_path):
+    events = analyze_timing.parse_events([_write_fixture(tmp_path)])
+    forest, _ = analyze_timing.build_forest(events)
+    html_text = analyze_timing.to_flamegraph_html(forest)
+
+    # Must be valid XML (SVG), not just something a lenient HTML5 parser
+    # tolerates -- catches any un-escaped '&'/'<' from a phase name.
+    ET.fromstring(_svg_fragment(html_text))
+
+
+def test_flamegraph_html_shows_every_phase_and_pid_lane(tmp_path):
+    events = analyze_timing.parse_events([_write_fixture(tmp_path)])
+    forest, _ = analyze_timing.build_forest(events)
+    html_text = analyze_timing.to_flamegraph_html(forest)
+
+    for name in [
+        'iglos.build', 'iglos.build.run_elbe.extend', 'iglos.build.merge_addons',
+        'elbe.build.install_packages.target',
+    ]:
+        assert name in html_text
+    assert 'pid 100' in html_text
+    assert 'pid 200' in html_text
+
+
+def test_flamegraph_html_nested_span_stays_within_parent_bounds(tmp_path):
+    # elbe.build.install_packages.target (pid 200) runs entirely inside
+    # the time window of iglos.build.run_elbe.extend (pid 100), even
+    # though they're in different lanes -- their x positions should
+    # reflect that containment.
+    events = analyze_timing.parse_events([_write_fixture(tmp_path)])
+    forest, _ = analyze_timing.build_forest(events)
+    html_text = analyze_timing.to_flamegraph_html(forest, width=1000)
+
+    rects = re.findall(
+        r'<rect[^>]*x="([\d.]+)"[^>]*width="([\d.]+)"[^>]*><title>([^\n]+)', html_text,
+    )
+    by_name = {name: (float(x), float(w)) for x, w, name in rects}
+
+    parent_x, parent_w = by_name['iglos.build.run_elbe.extend']
+    child_x, child_w = by_name['elbe.build.install_packages.target']
+    assert parent_x <= child_x
+    assert child_x + child_w <= parent_x + parent_w
+
+
+def test_flamegraph_html_handles_empty_forest():
+    html_text = analyze_timing.to_flamegraph_html([])
+    assert html_text.startswith('<!doctype html>')
+    assert 'no completed spans' in html_text
+
+
+def test_main_writes_flamegraph_html(tmp_path):
+    log_path = _write_fixture(tmp_path)
+    out_path = tmp_path / 'flame.html'
+
+    analyze_timing.main(['--flamegraph', str(out_path), str(log_path)])
+
+    html_text = out_path.read_text()
+    ET.fromstring(_svg_fragment(html_text))
+    assert 'iglos.build' in html_text
 
 
 def test_main_reports_missing_timing_lines(tmp_path):
