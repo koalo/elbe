@@ -244,7 +244,7 @@ text.span-label { font: 10px monospace; fill: #111; pointer-events: none; }
 """
 
 
-def to_flamegraph_html(forest, *, width=1600, row_height=20):
+def to_flamegraph_html(forest, *, pixels_per_second=5, min_width=800, row_height=20):
     """Render a self-contained flame-chart HTML page (inline SVG, no
     external JS/CSS/fonts) -- open the file directly in any browser, no
     network access needed.
@@ -255,6 +255,12 @@ def to_flamegraph_html(forest, *, width=1600, row_height=20):
     lanes), and each (pid, tid) gets its own horizontal lane in which
     nested calls stack upward from that lane's own top-level spans --
     matching build_forest()'s per-(pid, tid) nesting (see its docstring).
+
+    The time scale (pixels_per_second) is fixed rather than derived from
+    the build's total duration, so "1 second" is always the same number
+    of pixels -- this keeps flamegraphs from different runs visually
+    comparable. The SVG grows wider for longer builds instead (scrollable
+    via the surrounding .scroll div).
     """
     ended = [n for n in _walk(forest) if n['end'] is not None]
     if not ended:
@@ -266,7 +272,8 @@ def to_flamegraph_html(forest, *, width=1600, row_height=20):
     min_ts = min(n['begin'] for n in ended)
     max_ts = max(n['end'] for n in ended)
     total_us = max(max_ts - min_ts, 1)
-    scale = width / total_us  # pixels per microsecond
+    scale = pixels_per_second / 1e6  # fixed pixels per microsecond
+    width = max(total_us * scale, min_width)
 
     lanes = defaultdict(list)
     for node in forest:

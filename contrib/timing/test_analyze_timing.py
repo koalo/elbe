@@ -285,7 +285,7 @@ def test_flamegraph_html_nested_span_stays_within_parent_bounds(tmp_path):
     # reflect that containment.
     events = analyze_timing.parse_events([_write_fixture(tmp_path)])
     forest, _ = analyze_timing.build_forest(events)
-    html_text = analyze_timing.to_flamegraph_html(forest, width=1000)
+    html_text = analyze_timing.to_flamegraph_html(forest, pixels_per_second=1000)
 
     rects = re.findall(
         r'<rect[^>]*x="([\d.]+)"[^>]*width="([\d.]+)"[^>]*><title>([^\n]+)', html_text,
