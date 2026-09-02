@@ -219,6 +219,10 @@ class RPCAPTCache(InChRootObject):
         p = self.cache[pkgname]
         p.mark_delete(purge=True)
 
+    def mark_keep(self, pkgname):
+        p = self.cache[pkgname]
+        p.mark_keep()
+
     @_with_pseudo_filesystems
     def update(self):
         with phase('elbe.apt.update'):

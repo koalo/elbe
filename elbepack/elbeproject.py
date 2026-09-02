@@ -1089,21 +1089,31 @@ class ElbeProject:
             # the functions cleans up to much
             # self.get_rpcaptcache().cleanup(debootstrap_pkgs + pkgs)
 
+            no_sync_active = False
+            if no_sync:
+                # TEMPORARY (debugging, per user request): abort hard instead of
+                # falling back, so failures to install eatmydata are never masked
+                # while we're verifying the feature actually engages. Revert to a
+                # try/except Exception around this block (falling back to
+                # no_sync_active=False, and calling mark_keep('eatmydata') to
+                # cancel the pending mark on failure) once confirmed working.
+                #
+                # Must complete entirely (including fetch_archives(), which needs
+                # a working resolver) before end_excursion('/etc/resolv.conf')
+                # below tears down the chroot's only DNS config. Its own commit()
+                # is purely local (dpkg unpacking an already-fetched .deb), so it's
+                # fine for that part to happen before or after the excursion ends;
+                # it's kept here, before the main fetch, so eatmydata is already
+                # unpacked and its .so discoverable before the main commit() runs.
+                self.get_rpcaptcache(env=target).mark_install('eatmydata', None)
+                self.get_rpcaptcache(env=target).fetch_archives()
+                self.get_rpcaptcache(env=target).commit()
+                no_sync_active = True
+
             self.get_rpcaptcache(env=target).fetch_archives()
 
             # The package installation below may want to manage resolv.conf.
             target.rfs.end_excursion('/etc/resolv.conf')
-
-            no_sync_active = False
-            if no_sync:
-                try:
-                    self.get_rpcaptcache(env=target).mark_install('eatmydata', None)
-                    self.get_rpcaptcache(env=target).fetch_archives()
-                    self.get_rpcaptcache(env=target).commit()
-                    no_sync_active = True
-                except (KeyError, SystemError):
-                    logging.exception('Unable to install eatmydata, '
-                                      'continuing without disabling fsync')
 
             try:
                 self.get_rpcaptcache(env=target).commit(no_sync=no_sync_active)
