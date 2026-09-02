@@ -14,6 +14,7 @@ from elbepack.archivedir import archive_tmpfile
 from elbepack.finetuning import do_finetuning
 from elbepack.log import report, validation
 from elbepack.shellhelper import do
+from elbepack.timing import phase
 from elbepack.version import elbe_version
 
 
@@ -233,19 +234,23 @@ def elbe_report(xml, buildenv, cache, targetfs, builddir):
             report.info('|%s|%s|%s', p.name, p.installed_version,
                         f'{p.origin.site} {p.origin.codename} {p.origin.component}')
 
-    index = cache.get_fileindex(removeprefix='/usr')
-    mt_index = targetfs.mtime_snap()
+    with phase('elbe.build.gen_report.fileindex'):
+        index = cache.get_fileindex(removeprefix='/usr')
+    with phase('elbe.build.gen_report.mtime_snap'):
+        mt_index = targetfs.mtime_snap()
 
     if xml.has('archive') and not xml.text('archive') is None:
         with archive_tmpfile(xml.text('archive')) as fp:
             do(f'tar xvfj "{fp.name}" -h -C "{targetfs.path}"')
-        mt_index_postarch = targetfs.mtime_snap()
+        with phase('elbe.build.gen_report.mtime_snap'):
+            mt_index_postarch = targetfs.mtime_snap()
     else:
         mt_index_postarch = mt_index
 
     if xml.has('target/finetuning'):
         do_finetuning(xml, buildenv, targetfs, builddir)
-        mt_index_post_fine = targetfs.mtime_snap()
+        with phase('elbe.build.gen_report.mtime_snap'):
+            mt_index_post_fine = targetfs.mtime_snap()
     else:
         mt_index_post_fine = mt_index_postarch
 
@@ -256,43 +261,45 @@ def elbe_report(xml, buildenv, cache, targetfs, builddir):
 
     tgt_pkg_list = set()
 
-    for fpath, _ in targetfs.walk_files(sort=True):
-        unprefixed = fpath[len('/usr'):] if fpath.startswith('/usr') else fpath
-        if unprefixed in index:
-            pkg = index[unprefixed]
-            tgt_pkg_list.add(pkg)
-        else:
-            pkg = 'postinst generated'
-
-        if fpath in mt_index_post_fine:
-            if fpath in mt_index_postarch:
-                if mt_index_post_fine[fpath] != mt_index_postarch[fpath]:
-                    pkg = 'modified finetuning'
-                elif fpath in mt_index:
-                    if mt_index_postarch[fpath] != mt_index[fpath]:
-                        pkg = 'from archive'
-                    # else leave pkg as is
-                else:
-                    pkg = 'added in archive'
+    with phase('elbe.build.gen_report.file_list'):
+        for fpath, _ in targetfs.walk_files(sort=True):
+            unprefixed = fpath[len('/usr'):] if fpath.startswith('/usr') else fpath
+            if unprefixed in index:
+                pkg = index[unprefixed]
+                tgt_pkg_list.add(pkg)
             else:
-                pkg = 'added in finetuning'
-        # else leave pkg as is
+                pkg = 'postinst generated'
 
-        report.info('|+%s+|%s', fpath, pkg)
+            if fpath in mt_index_post_fine:
+                if fpath in mt_index_postarch:
+                    if mt_index_post_fine[fpath] != mt_index_postarch[fpath]:
+                        pkg = 'modified finetuning'
+                    elif fpath in mt_index:
+                        if mt_index_postarch[fpath] != mt_index[fpath]:
+                            pkg = 'from archive'
+                        # else leave pkg as is
+                    else:
+                        pkg = 'added in archive'
+                else:
+                    pkg = 'added in finetuning'
+            # else leave pkg as is
+
+            report.info('|+%s+|%s', fpath, pkg)
 
     report.info('')
     report.info('Deleted Files')
     report.info('-------------')
     report.info('')
 
-    for fpath in list(mt_index.keys()):
-        if fpath not in mt_index_post_fine:
-            unprefixed = fpath[len('/usr'):] if fpath.startswith('/usr') else fpath
-            if unprefixed in index:
-                pkg = index[unprefixed]
-            else:
-                pkg = 'postinst generated'
-            report.info('|+%s+|%s', fpath, pkg)
+    with phase('elbe.build.gen_report.file_list'):
+        for fpath in list(mt_index.keys()):
+            if fpath not in mt_index_post_fine:
+                unprefixed = fpath[len('/usr'):] if fpath.startswith('/usr') else fpath
+                if unprefixed in index:
+                    pkg = index[unprefixed]
+                else:
+                    pkg = 'postinst generated'
+                report.info('|+%s+|%s', fpath, pkg)
 
     report.info('')
     report.info('Target Package List')
@@ -307,16 +314,17 @@ def elbe_report(xml, buildenv, cache, targetfs, builddir):
     if xml.has('target/pkgversionlist'):
         targetfs.remove('etc/elbe_pkglist')
         f = targetfs.open('etc/elbe_pkglist', 'w')
-    for pkg in tgt_pkg_list:
-        p = pkgindex[pkg]
-        hashes = ','.join(p.installed_hashes.values())
-        report.info('|%s|%s|%s|%s',
-                    p.name,
-                    p.installed_version,
-                    p.is_auto_installed,
-                    hashes)
-        if xml.has('target/pkgversionlist'):
-            f.write(f'{p.name} {p.installed_version} {hashes}\n')
+    with phase('elbe.build.gen_report.pkg_list'):
+        for pkg in tgt_pkg_list:
+            p = pkgindex[pkg]
+            hashes = ','.join(p.installed_hashes.values())
+            report.info('|%s|%s|%s|%s',
+                        p.name,
+                        p.installed_version,
+                        p.is_auto_installed,
+                        hashes)
+            if xml.has('target/pkgversionlist'):
+                f.write(f'{p.name} {p.installed_version} {hashes}\n')
 
     if xml.has('target/pkgversionlist'):
         f.close()

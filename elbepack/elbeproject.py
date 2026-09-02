@@ -669,7 +669,8 @@ class ElbeProject:
 
         # Elbe report
         cache = self.get_rpcaptcache()
-        tgt_pkgs = elbe_report(self.xml, self.buildenv, cache, self.targetfs, self.builddir)
+        with phase('elbe.build.gen_report'):
+            tgt_pkgs = elbe_report(self.xml, self.buildenv, cache, self.targetfs, self.builddir)
 
         # chroot' licenses
         with phase('elbe.build.gen_licenses.chroot'):
