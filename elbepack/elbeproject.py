@@ -1122,17 +1122,21 @@ class ElbeProject:
                 raise AptCacheCommitError(str(e))
 
             if no_sync_active:
-                self.get_rpcaptcache(env=target).mark_delete('eatmydata')
+                eatmydata_pkgs = self.get_rpcaptcache(env=target).eatmydata_packages()
+                for pkgname in eatmydata_pkgs:
+                    self.get_rpcaptcache(env=target).mark_delete(pkgname)
                 try:
                     self.get_rpcaptcache(env=target).commit()
                 except SystemError as e:
                     logging.exception('Purging eatmydata failed')
                     raise AptCacheCommitError(str(e))
 
-                # Don't let the downloaded .deb leak into the target image,
+                # Don't let the downloaded .debs leak into the target image,
                 # extract_target() may copy /var/cache/apt/archives verbatim.
-                for f in glob.glob(f'{self.chrootpath}/var/cache/apt/archives/eatmydata_*.deb'):
-                    os.remove(f)
+                for pkgname in eatmydata_pkgs:
+                    for f in glob.glob(
+                            f'{self.chrootpath}/var/cache/apt/archives/{pkgname}_*.deb'):
+                        os.remove(f)
 
     def gen_licenses(self, rfs, env, pkg_list):
 

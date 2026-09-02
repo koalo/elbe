@@ -237,12 +237,31 @@ class RPCAPTCache(InChRootObject):
 
     @staticmethod
     def _eatmydata_lib():
-        out = subprocess.run(['dpkg', '-L', 'eatmydata'], check=True,
+        # The shared library actually lives in libeatmydata1 (a dependency of
+        # the eatmydata wrapper-script package), under a SONAME-versioned name
+        # like libeatmydata.so.1, not an unversioned libeatmydata.so. Resolve it
+        # via ldconfig's cache instead of guessing a package name/suffix.
+        out = subprocess.run(['ldconfig', '-p'], check=True,
                              capture_output=True, text=True).stdout
         for line in out.splitlines():
-            if line.endswith('.so'):
-                return line
-        raise SystemError('eatmydata package does not ship a .so library')
+            line = line.strip()
+            if line.startswith('libeatmydata.so') and '=>' in line:
+                return line.split('=>', 1)[1].strip()
+        raise SystemError('libeatmydata.so not found via ldconfig')
+
+    def eatmydata_packages(self):
+        """Installed package names providing eatmydata, for cleanup after a
+        no_sync build phase: the 'eatmydata' wrapper package plus whichever
+        package actually owns the shared library (e.g. libeatmydata1), found
+        by asking dpkg rather than assuming a name."""
+        pkgs = {'eatmydata'}
+        out = subprocess.run(['dpkg', '-S', self._eatmydata_lib()], check=True,
+                             capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            # Lines look like "pkgname[:arch][, pkgname2...]: /path/to/file".
+            names = line.rsplit(':', 1)[0]
+            pkgs.update(p.strip().split(':')[0] for p in names.split(','))
+        return pkgs
 
     @_with_pseudo_filesystems
     def commit(self, no_sync=False):
