@@ -105,6 +105,48 @@ def test_parse_events_deduplicates_across_multiple_files(tmp_path):
     assert len(events) == 2
 
 
+# Real captures have occasionally shown two independent, unsynchronized
+# writes landing on the same physical line with zero separator between
+# them (see analyze_timing.py's _LINE_RE comment) -- e.g. elbe's own
+# '[TIMING] ...' handler's write for a begin event gets no newline before
+# the SOAP apt-worker relay's 'INFO:soap:...'/'INFO:root:...' write lands
+# right after it, sometimes gluing a second complete event onto the same
+# line.
+GLUED_LINES_LOG = """\
+[TIMING] ELBE-TIMING ph=B ts=3000000 pid=7 tid=1 name=elbe.build.install_packages.buildenvINFO:soap:Hit http://cdn-fastly.deb.debian.org/debian trixie InRelease
+[TIMING] ELBE-TIMING ph=B ts=3010000 pid=6820 tid=2 name=elbe.shell.mvINFO:root:ELBE-TIMING ph=E ts=3020000 pid=6820 tid=2 name=elbe.shell.mv
+[TIMING] ELBE-TIMING ph=B ts=3030000 pid=6820 tid=2 name=elbe.shell.sfdiskINFO:soap:8388608+0 records in
+[TIMING] ELBE-TIMING ph=E ts=3040000 pid=6820 tid=2 name=elbe.shell.sfdisk
+[TIMING] ELBE-TIMING ph=E ts=3050000 pid=7 tid=1 name=elbe.build.install_packages.buildenv
+"""
+
+
+def test_parse_events_recovers_names_glued_to_trailing_content(tmp_path):
+    path = _write_fixture(tmp_path, 'glued.log', GLUED_LINES_LOG)
+    events = analyze_timing.parse_events([path])
+
+    names = {e['name'] for e in events}
+    assert 'elbe.build.install_packages.buildenv' in names
+    assert 'elbe.shell.mv' in names
+    assert 'elbe.shell.sfdisk' in names
+    assert not any('INFO' in name or ':' in name for name in names)
+
+
+def test_parse_events_recovers_both_events_glued_onto_one_line(tmp_path):
+    path = _write_fixture(tmp_path, 'glued.log', GLUED_LINES_LOG)
+    events = analyze_timing.parse_events([path])
+
+    mv_events = [e for e in events if e['name'] == 'elbe.shell.mv']
+    assert [e['ph'] for e in mv_events] == ['B', 'E']
+    assert [e['ts'] for e in mv_events] == [3010000, 3020000]
+
+
+def test_build_forest_reports_no_warnings_for_glued_lines(tmp_path):
+    events = analyze_timing.parse_events([_write_fixture(tmp_path, 'glued.log', GLUED_LINES_LOG)])
+    _, warnings = analyze_timing.build_forest(events)
+    assert warnings == []
+
+
 def test_build_forest_nests_only_within_same_pid_tid(tmp_path):
     events = analyze_timing.parse_events([_write_fixture(tmp_path)])
     forest, warnings = analyze_timing.build_forest(events)

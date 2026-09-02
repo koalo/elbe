@@ -38,9 +38,18 @@ import sys
 import zlib
 from collections import defaultdict
 
+# name= is normally terminated by whitespace/end-of-line. But elbe's two
+# unsynchronized logging handlers (see parse_events()'s docstring) can, on
+# rare occasions, interleave two independent writes with no separator at
+# all -- e.g. 'name=elbe.shell.mvINFO:root:ELBE-TIMING ph=E ts=...' or
+# 'name=elbe.shell.sfdiskINFO:soap:8388608+0 records in'. All real phase
+# names are lowercase dotted identifiers (see elbepack/timing.py callers),
+# so the lookahead also stops name= at the first sign of such glued-on
+# content: a log-level prefix ('INFO:', 'WARNING:', ...), a '[TIMING]'/
+# '[CMD]'/'[INFO]' handler prefix, or a directly-glued second event.
 _LINE_RE = re.compile(
     r'ELBE-TIMING ph=(?P<ph>[BE]) ts=(?P<ts>\d+) pid=(?P<pid>\d+) '
-    r'tid=(?P<tid>\d+) name=(?P<name>\S+)'
+    r'tid=(?P<tid>\d+) name=(?P<name>\S+?)(?=\s|$|\[|ELBE-TIMING|[A-Z][A-Za-z]*:)'
 )
 
 
@@ -56,14 +65,19 @@ def parse_events(paths):
     different prefixes) in a captured build log. Such repeats are
     deduplicated on the (ph, ts, pid, tid, name) tuple before being
     returned, so callers never see inflated counts/totals from this.
+
+    Those same unsynchronized handlers can also, rarely, interleave two
+    independent writes onto one physical line with no separator (see
+    _LINE_RE's comment) -- possibly gluing two complete events onto a
+    single line. Each line is scanned for every match it contains (not
+    just the first), so both events are still recovered.
     """
     events = []
     seen = set()
     for path in paths:
         with open(path, encoding='utf-8', errors='replace') as f:
             for line in f:
-                m = _LINE_RE.search(line)
-                if m:
+                for m in _LINE_RE.finditer(line):
                     key = (
                         m.group('ph'), int(m.group('ts')), int(m.group('pid')),
                         int(m.group('tid')), m.group('name'),
