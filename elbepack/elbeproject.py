@@ -1089,26 +1089,15 @@ class ElbeProject:
             # the functions cleans up to much
             # self.get_rpcaptcache().cleanup(debootstrap_pkgs + pkgs)
 
-            no_sync_active = False
+            eatmydata_dir = '/var/cache/elbe-eatmydata'
+            eatmydata_lib = None
             if no_sync:
-                # TEMPORARY (debugging, per user request): abort hard instead of
-                # falling back, so failures to install eatmydata are never masked
-                # while we're verifying the feature actually engages. Revert to a
-                # try/except Exception around this block (falling back to
-                # no_sync_active=False, and calling mark_keep('eatmydata') to
-                # cancel the pending mark on failure) once confirmed working.
-                #
-                # Must complete entirely (including fetch_archives(), which needs
-                # a working resolver) before end_excursion('/etc/resolv.conf')
-                # below tears down the chroot's only DNS config. Its own commit()
-                # is purely local (dpkg unpacking an already-fetched .deb), so it's
-                # fine for that part to happen before or after the excursion ends;
-                # it's kept here, before the main fetch, so eatmydata is already
-                # unpacked and its .so discoverable before the main commit() runs.
-                self.get_rpcaptcache(env=target).mark_install('eatmydata', None)
-                self.get_rpcaptcache(env=target).fetch_archives()
-                self.get_rpcaptcache(env=target).commit()
-                no_sync_active = True
+                try:
+                    eatmydata_lib = self.get_rpcaptcache(
+                        env=target).fetch_eatmydata_lib(eatmydata_dir)
+                except (KeyError, SystemError, subprocess.CalledProcessError):
+                    logging.exception('Unable to fetch eatmydata, '
+                                      'continuing without disabling fsync')
 
             self.get_rpcaptcache(env=target).fetch_archives()
 
@@ -1116,27 +1105,15 @@ class ElbeProject:
             target.rfs.end_excursion('/etc/resolv.conf')
 
             try:
-                self.get_rpcaptcache(env=target).commit(no_sync=no_sync_active)
+                self.get_rpcaptcache(env=target).commit(eatmydata_lib=eatmydata_lib)
             except SystemError as e:
                 logging.exception('Commiting changes failed')
                 raise AptCacheCommitError(str(e))
 
-            if no_sync_active:
-                eatmydata_pkgs = self.get_rpcaptcache(env=target).eatmydata_packages()
-                for pkgname in eatmydata_pkgs:
-                    self.get_rpcaptcache(env=target).mark_delete(pkgname)
-                try:
-                    self.get_rpcaptcache(env=target).commit()
-                except SystemError as e:
-                    logging.exception('Purging eatmydata failed')
-                    raise AptCacheCommitError(str(e))
-
-                # Don't let the downloaded .debs leak into the target image,
-                # extract_target() may copy /var/cache/apt/archives verbatim.
-                for pkgname in eatmydata_pkgs:
-                    for f in glob.glob(
-                            f'{self.chrootpath}/var/cache/apt/archives/{pkgname}_*.deb'):
-                        os.remove(f)
+            if eatmydata_lib:
+                # Don't let the extracted library leak into the target image,
+                # extract_target() may copy the chroot verbatim.
+                self.get_rpcaptcache(env=target).remove_eatmydata_lib(eatmydata_dir)
 
     def gen_licenses(self, rfs, env, pkg_list):
 

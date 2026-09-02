@@ -4,6 +4,7 @@
 
 import functools
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -219,10 +220,6 @@ class RPCAPTCache(InChRootObject):
         p = self.cache[pkgname]
         p.mark_delete(purge=True)
 
-    def mark_keep(self, pkgname):
-        p = self.cache[pkgname]
-        p.mark_keep()
-
     @_with_pseudo_filesystems
     def update(self):
         with phase('elbe.apt.update'):
@@ -235,52 +232,67 @@ class RPCAPTCache(InChRootObject):
         with phase('elbe.apt.fetch_archives'):
             self.cache.fetch_archives(ElbeAcquireProgress())
 
-    @staticmethod
-    def _eatmydata_lib():
-        # The shared library actually lives in libeatmydata1 (a dependency of
-        # the eatmydata wrapper-script package), under a SONAME-versioned name
-        # like libeatmydata.so.1, not an unversioned libeatmydata.so. Resolve it
-        # via ldconfig's cache instead of guessing a package name/suffix.
-        out = subprocess.run(['ldconfig', '-p'], check=True,
-                             capture_output=True, text=True).stdout
-        for line in out.splitlines():
-            line = line.strip()
-            if line.startswith('libeatmydata.so') and '=>' in line:
-                return line.split('=>', 1)[1].strip()
-        raise SystemError('libeatmydata.so not found via ldconfig')
+    @_with_pseudo_filesystems
+    def fetch_eatmydata_lib(self, dest_dir):
+        """Fetch eatmydata's shared library and extract it directly with
+        dpkg-deb, without installing it through dpkg.
 
-    def eatmydata_packages(self):
-        """Installed package names providing eatmydata, for cleanup after a
-        no_sync build phase: the 'eatmydata' wrapper package plus whichever
-        package actually owns the shared library (e.g. libeatmydata1), found
-        by asking dpkg rather than assuming a name."""
-        pkgs = {'eatmydata'}
-        # ldconfig reports the /lib/<triplet> path, but on merged-/usr systems
-        # that's a symlink to /usr/lib/<triplet>, and dpkg's file database
-        # only knows the canonical path -- dpkg -S doesn't resolve the
-        # symlink itself, so do it here or the lookup fails with exit 1.
-        lib_path = os.path.realpath(self._eatmydata_lib())
-        out = subprocess.run(['dpkg', '-S', lib_path], check=True,
-                             capture_output=True, text=True).stdout
-        for line in out.splitlines():
-            # Lines look like "pkgname[:arch][, pkgname2...]: /path/to/file".
-            names = line.rsplit(':', 1)[0]
-            pkgs.update(p.strip().split(':')[0] for p in names.split(','))
-        return pkgs
+        Installing eatmydata as a real package (and purging it again
+        afterwards) forces apt to flush deferred dpkg triggers (man-db,
+        ldconfig, ...) on every extra commit. Under cross builds (running
+        target-arch maintainer scripts through qemu-user), that trigger
+        reprocessing costs far more than what eatmydata saves by disabling
+        fsync, so avoid touching dpkg's database for it entirely.
+        """
+        with phase('elbe.apt.fetch_eatmydata'):
+            os.makedirs(dest_dir, exist_ok=True)
+
+            # Snapshot pre-existing marks first: resolving eatmydata's own
+            # dependencies must not revert packages already marked for
+            # install by the caller (e.g. the target package list), so only
+            # packages newly marked by this call are fetched and reverted.
+            already_marked = {p.name for p in self.cache if p.marked_install}
+            pkg = self.cache['eatmydata']
+            pkg.mark_install(auto_fix=True, auto_inst=True, from_user=True)
+            to_fetch = [p for p in self.cache
+                       if p.marked_install and not p.is_installed
+                       and p.name not in already_marked]
+
+            try:
+                debs = [p.candidate.fetch_binary(dest_dir, ElbeAcquireProgress())
+                       for p in to_fetch]
+            finally:
+                for p in to_fetch:
+                    p.mark_keep()
+
+            for deb in debs:
+                subprocess.run(['dpkg-deb', '-x', deb, dest_dir], check=True)
+                os.remove(deb)
+
+            for root, _dirs, files in os.walk(dest_dir):
+                for f in files:
+                    full = os.path.join(root, f)
+                    if f.startswith('libeatmydata.so') and os.path.isfile(full):
+                        return full
+
+            raise SystemError('libeatmydata.so not found after extracting eatmydata')
+
+    def remove_eatmydata_lib(self, dest_dir):
+        shutil.rmtree(dest_dir, ignore_errors=True)
 
     @_with_pseudo_filesystems
-    def commit(self, no_sync=False):
+    def commit(self, eatmydata_lib=None):
         os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
         os.environ['DEBONF_NONINTERACTIVE_SEEN'] = 'true'
         print('Commiting changes ...')
         with phase('elbe.apt.commit'):
-            if no_sync:
-                os.environ['LD_PRELOAD'] = self._eatmydata_lib()
+            if eatmydata_lib:
+                os.environ['LD_PRELOAD'] = eatmydata_lib
             try:
                 self.cache.commit(ElbeAcquireProgress(),
                                   ElbeInstallProgress(fileno=sys.stdout.fileno()))
             finally:
-                if no_sync:
+                if eatmydata_lib:
                     del os.environ['LD_PRELOAD']
             self.cache.open(progress=ElbeOpProgress())
 
