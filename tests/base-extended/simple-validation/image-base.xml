@@ -56,7 +56,7 @@ SPDX-FileCopyrightText: Linutronix GmbH
                 <hostname>validation-image</hostname>
                 <package>
                         <base-image>
-                                <name>base-rootfs.tgz</name>
+                                <name>base-rootfs.tar</name>
                         </base-image>
                 </package>
 

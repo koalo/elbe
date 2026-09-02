@@ -16,7 +16,7 @@ import time
 from elbepack.filesystem import Filesystem
 from elbepack.fstab import fstabentry
 from elbepack.licencexml import copyright_xml
-from elbepack.packers import default_packer
+from elbepack.packers import default_packer, packers
 from elbepack.shellhelper import bind_mount_pseudo_filesystems, chroot, do
 from elbepack.version import elbe_version
 
@@ -452,10 +452,11 @@ class TargetFs(ChRootFilesystem):
 
     def part_target(self, targetdir, grub_version, grub_fw_type):
 
-        def _make_tarball(options, targz_name):
+        def _make_tarball(options, targz_name, compress=True):
             try:
-                cmd = 'tar cfz %(dest)s/%(fname)s -C %(sdir)s %(options)s .'
+                cmd = 'tar c%(z)sf %(dest)s/%(fname)s -C %(sdir)s %(options)s .'
                 args = dict(
+                    z='z' if compress else '',
                     options=options,
                     dest=targetdir,
                     fname=targz_name,
@@ -490,7 +491,8 @@ class TargetFs(ChRootFilesystem):
 
         if self.xml.has('target/package/base-image'):
             targz_name = self.xml.text('target/package/base-image/name')
-            _make_tarball('', targz_name)
+            _make_tarball('', targz_name, compress=False)
+            self.image_packers[targz_name] = packers['gzip']
 
         if self.xml.has('target/package/cpio'):
             oldwd = os.getcwd()

@@ -11,6 +11,7 @@ import pathlib
 import pytest
 
 from elbepack.main import run_elbe_subcommand
+from elbepack.packers import find_packed_image
 from elbepack.tests import xml_test_files
 
 
@@ -52,7 +53,7 @@ def base_image_build(request, build_driver, tmp_path_factory):
 
 @pytest.mark.slow
 def test_build_base_image(base_image_build):
-    assert (base_image_build / 'base-rootfs.tgz').exists()
+    assert find_packed_image(base_image_build, 'base-rootfs.tar') is not None
 
 
 @pytest.mark.slow
@@ -60,5 +61,5 @@ def test_build_extended_image(request, build_driver, base_image_build, tmp_path_
     workdir = tmp_path_factory.mktemp('extended_build')
     build_driver.submit(
         request, _EXTENDED_XML, workdir,
-        skip_cdrom=True, base_image=base_image_build / 'base-rootfs.tgz',
+        skip_cdrom=True, base_image=find_packed_image(base_image_build, 'base-rootfs.tar'),
     )
