@@ -255,7 +255,12 @@ class RPCAPTCache(InChRootObject):
         package actually owns the shared library (e.g. libeatmydata1), found
         by asking dpkg rather than assuming a name."""
         pkgs = {'eatmydata'}
-        out = subprocess.run(['dpkg', '-S', self._eatmydata_lib()], check=True,
+        # ldconfig reports the /lib/<triplet> path, but on merged-/usr systems
+        # that's a symlink to /usr/lib/<triplet>, and dpkg's file database
+        # only knows the canonical path -- dpkg -S doesn't resolve the
+        # symlink itself, so do it here or the lookup fails with exit 1.
+        lib_path = os.path.realpath(self._eatmydata_lib())
+        out = subprocess.run(['dpkg', '-S', lib_path], check=True,
                              capture_output=True, text=True).stdout
         for line in out.splitlines():
             # Lines look like "pkgname[:arch][, pkgname2...]: /path/to/file".
