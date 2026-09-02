@@ -4,6 +4,7 @@
 
 import functools
 import os
+import subprocess
 import sys
 import time
 from multiprocessing.managers import BaseManager
@@ -230,14 +231,29 @@ class RPCAPTCache(InChRootObject):
         with phase('elbe.apt.fetch_archives'):
             self.cache.fetch_archives(ElbeAcquireProgress())
 
+    @staticmethod
+    def _eatmydata_lib():
+        out = subprocess.run(['dpkg', '-L', 'eatmydata'], check=True,
+                             capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            if line.endswith('.so'):
+                return line
+        raise SystemError('eatmydata package does not ship a .so library')
+
     @_with_pseudo_filesystems
-    def commit(self):
+    def commit(self, no_sync=False):
         os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
         os.environ['DEBONF_NONINTERACTIVE_SEEN'] = 'true'
         print('Commiting changes ...')
         with phase('elbe.apt.commit'):
-            self.cache.commit(ElbeAcquireProgress(),
-                              ElbeInstallProgress(fileno=sys.stdout.fileno()))
+            if no_sync:
+                os.environ['LD_PRELOAD'] = self._eatmydata_lib()
+            try:
+                self.cache.commit(ElbeAcquireProgress(),
+                                  ElbeInstallProgress(fileno=sys.stdout.fileno()))
+            finally:
+                if no_sync:
+                    del os.environ['LD_PRELOAD']
             self.cache.open(progress=ElbeOpProgress())
 
     def get_dependencies(self, pkgname):

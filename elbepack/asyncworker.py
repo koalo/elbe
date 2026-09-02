@@ -147,13 +147,14 @@ class BuildChrootTarJob(AsyncWorkerJob):
 
 class BuildJob(AsyncWorkerJob):
     def __init__(self, project, build_bin, build_src, skip_pbuilder,
-                 base_image_path, exclude_initvm_pkgs=False):
+                 base_image_path, exclude_initvm_pkgs=False, no_sync=False):
         super().__init__(project)
         self.build_bin = build_bin
         self.build_src = build_src
         self.skip_pbuilder = skip_pbuilder
         self.base_image_path = base_image_path
         self.exclude_initvm_pkgs = exclude_initvm_pkgs
+        self.no_sync = no_sync
 
     def enqueue(self, queue, db):
         db.set_busy(self.project.builddir,
@@ -172,7 +173,8 @@ class BuildJob(AsyncWorkerJob):
                                build_sources=self.build_src,
                                skip_pbuild=self.skip_pbuilder,
                                base_image_path=self.base_image_path,
-                               exclude_initvm_pkgs=self.exclude_initvm_pkgs)
+                               exclude_initvm_pkgs=self.exclude_initvm_pkgs,
+                               no_sync=self.no_sync)
         except (DebootstrapException, AptCacheCommitError, AptCacheUpdateError) as e:
             if isinstance(e, DebootstrapException):
                 err = 'Debootstrap failed to install the base rootfilesystem.'

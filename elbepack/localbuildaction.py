@@ -75,7 +75,8 @@ def _local_build_and_dl_result(xmlfile, cdrom, base_image, args):
             print('Copy finished')
 
         pm.build_project(prjdir, args.build_bin, args.build_sources, bool(cdrom),
-                         uploaded_base_image_path, args.exclude_initvm_pkgs)
+                         uploaded_base_image_path, args.exclude_initvm_pkgs,
+                         no_sync=True)
 
         print('Build started, waiting till it finishes')
 

@@ -573,7 +573,7 @@ class ElbeProject:
 
     def build(self, build_bin=False, build_sources=False, cdrom_size=None,
               skip_pkglist=False, skip_pbuild=False, base_image_path=None,
-              exclude_initvm_pkgs=False):
+              exclude_initvm_pkgs=False, no_sync=False):
 
         # Write the log header
         self.write_log_header()
@@ -615,7 +615,8 @@ class ElbeProject:
         # Install packages
         if not skip_pkglist:
             with phase('elbe.build.install_packages.target'):
-                self.install_packages(self.buildenv, exclude_initvm_pkgs=exclude_initvm_pkgs)
+                self.install_packages(self.buildenv, exclude_initvm_pkgs=exclude_initvm_pkgs,
+                                      no_sync=no_sync)
 
         try:
             self.buildenv.rfs.dump_elbeversion(self.xml)
@@ -656,7 +657,8 @@ class ElbeProject:
         if not skip_pkglist:
             with phase('elbe.build.install_packages.buildenv'):
                 self.install_packages(self.buildenv, buildenv=True,
-                                      exclude_initvm_pkgs=exclude_initvm_pkgs)
+                                      exclude_initvm_pkgs=exclude_initvm_pkgs,
+                                      no_sync=no_sync)
 
         # Write source.xml
         try:
@@ -1009,7 +1011,8 @@ class ElbeProject:
             logging.exception('%s is available.  But it does not '
                               'contain an initvm node', SOURCE_XML)
 
-    def install_packages(self, target, buildenv=False, exclude_initvm_pkgs=False):
+    def install_packages(self, target, buildenv=False, exclude_initvm_pkgs=False,
+                         no_sync=False):
 
         # to workaround debian bug no. 872543
         if self.xml.prj.has('noauth'):
@@ -1091,11 +1094,35 @@ class ElbeProject:
             # The package installation below may want to manage resolv.conf.
             target.rfs.end_excursion('/etc/resolv.conf')
 
+            no_sync_active = False
+            if no_sync:
+                try:
+                    self.get_rpcaptcache(env=target).mark_install('eatmydata', None)
+                    self.get_rpcaptcache(env=target).fetch_archives()
+                    self.get_rpcaptcache(env=target).commit()
+                    no_sync_active = True
+                except (KeyError, SystemError):
+                    logging.exception('Unable to install eatmydata, '
+                                      'continuing without disabling fsync')
+
             try:
-                self.get_rpcaptcache(env=target).commit()
+                self.get_rpcaptcache(env=target).commit(no_sync=no_sync_active)
             except SystemError as e:
                 logging.exception('Commiting changes failed')
                 raise AptCacheCommitError(str(e))
+
+            if no_sync_active:
+                self.get_rpcaptcache(env=target).mark_delete('eatmydata')
+                try:
+                    self.get_rpcaptcache(env=target).commit()
+                except SystemError as e:
+                    logging.exception('Purging eatmydata failed')
+                    raise AptCacheCommitError(str(e))
+
+                # Don't let the downloaded .deb leak into the target image,
+                # extract_target() may copy /var/cache/apt/archives verbatim.
+                for f in glob.glob(f'{self.chrootpath}/var/cache/apt/archives/eatmydata_*.deb'):
+                    os.remove(f)
 
     def gen_licenses(self, rfs, env, pkg_list):
 
