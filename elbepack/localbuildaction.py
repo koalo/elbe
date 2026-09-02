@@ -12,6 +12,7 @@ from elbepack.cli import CliError, with_cli_details
 from elbepack.projectmanager import ProjectManager
 from elbepack.repodir import Repodir, RepodirError
 from elbepack.rootcheck import check_rootful_requirements
+from elbepack.timing import phase
 from elbepack.xmlpreprocess import preprocess_file
 
 prog = os.path.basename(sys.argv[0])
@@ -150,10 +151,24 @@ def _local_build_and_dl_result(xmlfile, cdrom, base_image, args):
             print(f'Saving generated Files to {args.build_dir}')
 
             os.makedirs(args.build_dir, exist_ok=True)
-            for file in files:
-                shutil.copy(os.path.join(prjdir, file.name),
-                            os.path.join(args.build_dir, os.path.basename(file.name)))
-                print(f'{file.name}\t{file.description}')
+            with phase('elbe.build.collect_files'):
+                for file in files:
+                    src = os.path.join(prjdir, file.name)
+                    dst = os.path.join(args.build_dir, os.path.basename(file.name))
+                    if args.keep_files:
+                        # prjdir survives (see below), so it needs to keep
+                        # its own copy of the file too -- do a real copy.
+                        shutil.copy(src, dst)
+                    else:
+                        # prjdir is always build_dir/cache/<uuid> (see
+                        # ProjectManager.create_project()), so this is a
+                        # same-filesystem rename (an O(1) syscall, not a
+                        # byte-for-byte copy) -- and prjdir is about to be
+                        # deleted wholesale below anyway, so there is no
+                        # reason to copy multi-gigabyte image files out of
+                        # it first instead of just moving them.
+                        shutil.move(src, dst)
+                    print(f'{file.name}\t{file.description}')
 
             if not args.keep_files:
                 pm.del_project(prjdir)
