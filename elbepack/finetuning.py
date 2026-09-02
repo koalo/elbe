@@ -568,11 +568,14 @@ class ExtractPartitionAction(ImageFinetuningAction):
         imgname = os.path.join(builddir, self.node.et.text)
 
         if device is not None:
-            do(['dd', f'if={device}p{part_nr}', f'of={imgname}'])
+            do(['dd', f'if={device}p{part_nr}', f'of={imgname}', 'bs=1M', 'conv=sparse'])
         elif image is not None:
             start_sector, size_sectors, sectorsize = _get_partition_info(image, part_nr)
-            do(['dd', f'if={image}', f'of={imgname}',
-                f'bs={sectorsize}', f'skip={start_sector}', f'count={size_sectors}'])
+            # skip/count in bytes (via *_bytes) so the transfer can use a large,
+            # fast bs without being constrained to sector-sized chunks.
+            do(['dd', f'if={image}', f'of={imgname}', 'bs=1M',
+                f'skip={start_sector * sectorsize}', f'count={size_sectors * sectorsize}',
+                'iflag=skip_bytes,count_bytes', 'conv=sparse'])
         else:
             raise ValueError('Must pass either device or image')
 
@@ -592,11 +595,13 @@ class InsertPartitionAction(ImageFinetuningAction):
         srcname = os.path.join(builddir, self.node.et.text)
 
         if device is not None:
-            do(['dd', f'if={srcname}', f'of={device}p{part_nr}'])
+            do(['dd', f'if={srcname}', f'of={device}p{part_nr}', 'bs=1M'])
         elif image is not None:
             start_sector, _size_sectors, sectorsize = _get_partition_info(image, part_nr)
-            do(['dd', f'if={srcname}', f'of={image}',
-                f'bs={sectorsize}', f'seek={start_sector}', 'conv=notrunc'])
+            # seek in bytes (via seek_bytes) so the transfer can use a large,
+            # fast bs without being constrained to sector-sized chunks.
+            do(['dd', f'if={srcname}', f'of={image}', 'bs=1M',
+                f'seek={start_sector * sectorsize}', 'oflag=seek_bytes', 'conv=notrunc'])
         else:
             raise ValueError('Must pass either device or image')
 

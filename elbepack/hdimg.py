@@ -327,8 +327,8 @@ def create_label(disk, part, ppart, fslabel, target, grub):
                         if needs_cp:
                             do(['cp', '-a', filesystem_tree, str(mount_path) + '/'])
 
-        dd({'if': part_image_name, 'of': entry.filename, 'bs': 512,
-            'seek': entry.offset // 512, 'conv': 'notrunc'})
+        dd({'if': part_image_name, 'of': entry.filename, 'bs': '1M',
+            'seek': entry.offset, 'oflag': 'seek_bytes', 'conv': 'notrunc,sparse'})
     finally:
         os.unlink(part_image_name)
 
@@ -359,8 +359,8 @@ def create_binary(disk, part, ppart, target):
 
     tmp = _glob_single(tmp)
 
-    dd({'if': tmp, 'of': entry.filename, 'bs': 512,
-        'seek': entry.offset // 512, 'conv': 'notrunc'})
+    dd({'if': tmp, 'of': entry.filename, 'bs': '1M',
+        'seek': entry.offset, 'oflag': 'seek_bytes', 'conv': 'notrunc,sparse'})
 
 
 def create_logical_partitions(disk,
@@ -467,12 +467,12 @@ def add_binary_blob(hd, target):
             continue
 
         try:
-            offset = binary.et.attrib['offset']
+            offset = int(binary.et.attrib['offset'])
         except KeyError:
             offset = 0
 
         try:
-            bs = binary.et.attrib['blocksize']
+            bs = int(binary.et.attrib['blocksize'])
         except KeyError:
             bs = 1
 
@@ -484,7 +484,12 @@ def add_binary_blob(hd, target):
             # use file from /var/cache/elbe/<uuid> project dir
             bf = os.path.join(target, binary.et.text)
 
-        dd({'if': bf, 'of': imagename, 'seek': offset, 'bs': bs, 'conv': 'notrunc'})
+        # 'offset' is in units of 'blocksize' (e.g. offset=256 blocksize=512 is a
+        # well-known convention for TI boot images). Resolve that to a byte
+        # position ourselves and seek by bytes, so the actual dd transfer can use
+        # a large, fast block size without changing where the data lands.
+        dd({'if': bf, 'of': imagename, 'seek': offset * bs, 'oflag': 'seek_bytes',
+            'bs': '1M', 'conv': 'notrunc,sparse'})
 
 
 def do_hdimg(xml, target, rfs, grub_version, grub_fw_type):
