@@ -6,7 +6,7 @@ name: "Container: vmless (local build)"
 on:
   push:
     branches:
-      - devel/koalo/container-nosoap
+      - devel/koalo/timing
   workflow_dispatch:
 
 permissions:
