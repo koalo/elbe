@@ -1090,31 +1090,16 @@ class ElbeProject:
             # the functions cleans up to much
             # self.get_rpcaptcache().cleanup(debootstrap_pkgs + pkgs)
 
-            eatmydata_dir = '/var/cache/elbe-eatmydata'
-            eatmydata_lib = None
-            if no_sync:
-                try:
-                    eatmydata_lib = self.get_rpcaptcache(
-                        env=target).fetch_eatmydata_lib(eatmydata_dir)
-                except (KeyError, SystemError, subprocess.CalledProcessError):
-                    logging.exception('Unable to fetch eatmydata, '
-                                      'continuing without disabling fsync')
-
             self.get_rpcaptcache(env=target).fetch_archives()
 
             # The package installation below may want to manage resolv.conf.
             target.rfs.end_excursion('/etc/resolv.conf')
 
             try:
-                self.get_rpcaptcache(env=target).commit(eatmydata_lib=eatmydata_lib)
+                self.get_rpcaptcache(env=target).commit(no_sync=no_sync)
             except SystemError as e:
                 logging.exception('Commiting changes failed')
                 raise AptCacheCommitError(str(e))
-
-            if eatmydata_lib:
-                # Don't let the extracted library leak into the target image,
-                # extract_target() may copy the chroot verbatim.
-                self.get_rpcaptcache(env=target).remove_eatmydata_lib(eatmydata_dir)
 
     def gen_licenses(self, rfs, env, pkg_list):
 
