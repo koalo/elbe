@@ -4,7 +4,6 @@
 
 
 import datetime
-import gc
 import glob
 import io
 import logging
@@ -28,7 +27,6 @@ from elbepack.dump import (
 )
 from elbepack.efilesystem import TargetFs, extract_target
 from elbepack.elbexml import ElbeXML, NoInitvmNode, ValidationError
-from elbepack.experimental_overlay import DEFAULT_SIZE_MB, overlay_tmpfs
 from elbepack.filesystem import size_to_int
 from elbepack.finetuning import do_prj_finetuning
 from elbepack.log import validation
@@ -1028,31 +1026,7 @@ class ElbeProject:
                 os.remove(release_gpg[0])
                 logging.info('Removed Release.gpg file!')
 
-        # EXPERIMENTAL, opt-in (see elbepack/experimental_overlay.py): layer a
-        # tmpfs-backed self-overlay over the whole update/fetch/commit
-        # sequence below, on top of --force-unsafe-io (set unconditionally
-        # by RPCAPTCache.commit() when no_sync), to see how much of
-        # eatmydata's win it recovers without installing anything on the
-        # target. Never on unless both no_sync and the env var are set.
-        overlay_enabled = no_sync and os.environ.get('ELBE_APT_OVERLAY_TMPFS') == '1'
-        overlay_size_mb = int(os.environ.get('ELBE_APT_OVERLAY_TMPFS_MB', DEFAULT_SIZE_MB))
-
-        def _release_rpcaptcache_for_overlay():
-            # get_rpcaptcache(env=target) memoizes onto `target` and, once
-            # constructed, stays chroot()ed into overlay_tmpfs()'s
-            # mountpoint for as long as something holds the reference --
-            # nothing in the body below drops it. Called from
-            # overlay_tmpfs()'s own unconditional teardown (regardless of
-            # *why* the body exited), so the mount is never still busy with
-            # a live chroot() when overlay_tmpfs() tries to unmount it.
-            # gc.collect() forces the drop (and the manager subprocess's
-            # leave_chroot()) to happen now rather than at CPython's leisure.
-            self.drop_rpcaptcache(env=target)
-            gc.collect()
-
-        with target, overlay_tmpfs(target.rfs.path, size_mb=overlay_size_mb,
-                                   enabled=overlay_enabled,
-                                   pre_teardown=_release_rpcaptcache_for_overlay):
+        with target:
             # First update the apt cache
             try:
                 self.get_rpcaptcache(env=target).update()
