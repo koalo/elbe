@@ -10,6 +10,8 @@ import traceback
 from multiprocessing.managers import BaseManager
 from multiprocessing.util import Finalize
 
+import seccomp
+
 from apt import Cache
 
 from apt_pkg import config
@@ -82,7 +84,15 @@ def _install_nosync_seccomp_filter():
     # A loaded seccomp filter can never be removed for the life of a
     # process, so this must only run inside the short-lived forked child
     # from _commit_nosync(), never in the long-lived RPCAPTCache process.
-    import seccomp
+    #
+    # seccomp is imported at module level (not here) because by the time
+    # this runs, the RPCAPTCache process has already chroot()ed into the
+    # target rootfs (InChRootObject.__init__ -> enter_chroot()), which does
+    # not have python3-seccomp installed. Importing at module load time
+    # happens before that chroot, so it lands in sys.modules while '/' is
+    # still the real filesystem; the fork()ed child then just reuses the
+    # already-imported module instead of re-resolving it against the
+    # chrooted filesystem.
     f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
     for syscall in _NOSYNC_SYSCALLS:
         f.add_rule(seccomp.ERRNO(0), syscall)
