@@ -242,6 +242,13 @@ class RPCAPTCache(InChRootObject):
                 # failure rather than resumed, so the crash-safety
                 # --force-unsafe-io trades away isn't needed.
                 config.set('DPkg::options::', '--force-unsafe-io')
+                # TEMPORARY DEBUG, remove once confirmed: the mere presence
+                # of this line in build.log proves this build actually ran
+                # the --force-unsafe-io code path (vs. a stale container
+                # image still running the old eatmydata/no-op code), and the
+                # printed list proves the flag really landed in apt's config.
+                print(f'DEBUG-FORCEUNSAFEIO: DPkg::options='
+                     f'{config.value_list("DPkg::options")}')
             self.cache.commit(ElbeAcquireProgress(),
                               ElbeInstallProgress(fileno=sys.stdout.fileno()))
             self.cache.open(progress=ElbeOpProgress())
