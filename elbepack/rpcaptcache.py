@@ -6,6 +6,7 @@ import functools
 import os
 import sys
 import time
+import traceback
 from multiprocessing.managers import BaseManager
 from multiprocessing.util import Finalize
 
@@ -70,6 +71,43 @@ def _with_pseudo_filesystems(func):
         with self.rfs.mount_pseudo_filesystems():
             return func(self, *args, **kwargs)
     return wrapper
+
+
+_NOSYNC_SYSCALLS = ('fsync', 'fdatasync', 'sync', 'syncfs')
+
+
+def _install_nosync_seccomp_filter():
+    # Turns fsync & co. into instant no-op successes for this process and
+    # everything it fork()/exec()s from here on (dpkg, maintainer scripts).
+    # A loaded seccomp filter can never be removed for the life of a
+    # process, so this must only run inside the short-lived forked child
+    # from _commit_nosync(), never in the long-lived RPCAPTCache process.
+    import seccomp
+    f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
+    for syscall in _NOSYNC_SYSCALLS:
+        f.add_rule(seccomp.ERRNO(0), syscall)
+    f.load()
+
+
+def _commit_nosync(func):
+    sys.stdout.flush()
+    sys.stderr.flush()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            _install_nosync_seccomp_filter()
+            func()
+        except BaseException:
+            traceback.print_exc()
+            os._exit(1)
+        os._exit(0)
+
+    _, status = os.waitpid(pid, 0)
+    if os.WIFSIGNALED(status):
+        raise SystemError(f'commit() child was killed by signal {os.WTERMSIG(status)}')
+    exit_code = os.WEXITSTATUS(status)
+    if exit_code != 0:
+        raise SystemError(f'commit() child failed with exit code {exit_code}, see log above')
 
 
 @MyMan.register('RPCAPTCache')
@@ -241,16 +279,24 @@ class RPCAPTCache(InChRootObject):
                 # here because the chroot is discarded and rebuilt on any
                 # failure rather than resumed, so the crash-safety
                 # --force-unsafe-io trades away isn't needed.
-                config.set('DPkg::options::', '--force-unsafe-io')
-                # TEMPORARY DEBUG, remove once confirmed: the mere presence
-                # of this line in build.log proves this build actually ran
-                # the --force-unsafe-io code path (vs. a stale container
-                # image still running the old eatmydata/no-op code), and the
-                # printed list proves the flag really landed in apt's config.
-                print(f'DEBUG-FORCEUNSAFEIO: DPkg::options='
-                     f'{config.value_list("DPkg::options")}')
-            self.cache.commit(ElbeAcquireProgress(),
-                              ElbeInstallProgress(fileno=sys.stdout.fileno()))
+                #
+                # This RPCAPTCache instance (and its apt_pkg.config) is
+                # reused across multiple commit() calls for the same env
+                # (elbeproject.py's get_rpcaptcache() memoizes it), and
+                # config.set('DPkg::options::', ...) appends to a list --
+                # guard against adding a duplicate entry on every call.
+                if '--force-unsafe-io' not in config.value_list('DPkg::options'):
+                    config.set('DPkg::options::', '--force-unsafe-io')
+
+            def do_commit():
+                self.cache.commit(ElbeAcquireProgress(),
+                                  ElbeInstallProgress(fileno=sys.stdout.fileno()))
+
+            if no_sync:
+                _commit_nosync(do_commit)
+            else:
+                do_commit()
+
             self.cache.open(progress=ElbeOpProgress())
 
     def get_dependencies(self, pkgname):
