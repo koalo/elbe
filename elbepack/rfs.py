@@ -367,6 +367,15 @@ class BuildEnv:
         with self.rfs:
             chroot(self.rfs.path, ['debconf-set-selections'], input=preseed_txt.encode('ascii'))
 
+        self.rfs.mkdir_p('etc/dpkg/dpkg.cfg.d')
+        self.rfs.write_file('etc/dpkg/dpkg.cfg.d/01_nodoc', 0o644,
+                            'path-exclude=/usr/share/man/*\n'
+                            'path-exclude=/usr/share/locale/*\n'
+                            'path-include=/usr/share/locale/en/*\n'
+                            'path-include=/usr/share/locale/locale.alias\n'
+                            'path-include=/usr/share/doc/*/copyright\n'
+                            'path-include=/usr/share/doc/*/changelog*\n')
+
         self.rfs.mkdir_p('var/cache/apt/archives/partial')
         make_writable_by_apt(self.rfs.fname('var/cache/apt/archives/partial'),
                              passwd_root=self.rfs.path)

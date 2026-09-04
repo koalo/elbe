@@ -11,5 +11,7 @@ SPDX-FileCopyrightText: Linutronix GmbH
     <conf owner="samba-common" key="samba-common/workgroup " type="string" value="WORKGROUP"/>
 
     <conf owner="proftpd-basic" key="shared/proftpd/inetd_or_standalone" type="select" value="standalone"/>
+
+    <conf owner="man-db" key="man-db/auto-update" type="boolean" value="false"/>
   </preseed>
 </xml>
