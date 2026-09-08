@@ -102,6 +102,9 @@ class RepoBase:
             self.keyid = generate_elbe_internal_key()
             self.gen_repo_conf()
 
+    def _reprepro(self, args):
+        do(['reprepro', *args], env_add={'GNUPGHOME': '/var/cache/elbe/gnupg'})
+
     def get_volume_path(self, volume):
         if self.maxsize:
             if volume >= 0:
@@ -171,17 +174,14 @@ class RepoBase:
         export_key(self.keyid, self.volume / 'repo.pub')
 
         if need_update:
-            do(['reprepro', '--export=force', '--basedir', self.volume, 'update'],
-               env_add={'GNUPGHOME': '/var/cache/elbe/gnupg'})
+            self._reprepro(['--export=force', '--basedir', self.volume, 'update'])
         else:
             for att in self.attrs:
-                do(['reprepro', '--basedir', self.volume, 'export', att.codename],
-                   env_add={'GNUPGHOME': '/var/cache/elbe/gnupg'})
+                self._reprepro(['--basedir', self.volume, 'export', att.codename])
 
     def finalize(self):
         for att in self.attrs:
-            do(['reprepro', '--basedir', self.volume, 'export', att.codename],
-               env_add={'GNUPGHOME': '/var/cache/elbe/gnupg'})
+            self._reprepro(['--basedir', self.volume, 'export', att.codename])
 
     def _includedeb(self, path, codename, components=None, prio=None):
         if self.maxsize:
@@ -252,8 +252,7 @@ class RepoBase:
                 components = [components]
             global_opt.extend(['--component', '|'.join(components)])
 
-        do(['reprepro', *global_opt, 'remove', codename, pkgname],
-           env_add={'GNUPGHOME': '/var/cache/elbe/gnupg'})
+        self._reprepro([*global_opt, 'remove', codename, pkgname])
 
     def removedeb(self, pkgname, components=None):
         self._removedeb(pkgname, self.repo_attr.codename, components)
@@ -262,8 +261,7 @@ class RepoBase:
 
         global_opt = ['--basedir', self.volume]
 
-        do(['reprepro', *global_opt, 'removesrc', codename, srcname],
-           env_add={'GNUPGHOME': '/var/cache/elbe/gnupg'})
+        self._reprepro([*global_opt, 'removesrc', codename, srcname])
 
     def removesrc(self, path):
         with open(path) as fp:
