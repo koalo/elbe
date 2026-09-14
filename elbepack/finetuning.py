@@ -20,7 +20,7 @@ with warnings.catch_warnings():
     from gpg import core
     from gpg.constants import PROTOCOL_OpenPGP
 
-from elbepack.egpg import TARGET_GNUPG_HOME
+from elbepack.egpg import TARGET_GNUPG_HOME, check_gnupg_home
 from elbepack.filesystem import Filesystem
 from elbepack.imgutils import losetup
 from elbepack.packers import default_packer, packers
@@ -366,11 +366,14 @@ class UpdatedAction(FinetuningAction):
 
             logging.info('transfert gpg key to target: %s', fp)
 
+            gnupg_home = os.path.join(self.builddir, 'gnupg')
+            check_gnupg_home(gnupg_home)
+
             gpgdata = core.Data()
             ctx = core.Context()
             ctx.set_engine_info(PROTOCOL_OpenPGP,
                                 None,
-                                os.path.join(self.builddir, 'gnupg'))
+                                gnupg_home)
             ctx.set_armor(True)
             ctx.op_export(fp, 0, gpgdata)
             gpgdata.seek(0, os.SEEK_SET)

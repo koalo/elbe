@@ -21,6 +21,42 @@ from elbepack.paths import INITVM_GNUPG_HOME, TARGET_GNUPG_HOME  # noqa: F401
 from elbepack.shellhelper import env_add
 
 
+# struct sockaddr_un.sun_path size, see <linux/un.h>; includes the NUL terminator.
+_UNIX_PATH_MAX = 108
+
+# gpg-agent binds these directly under GNUPGHOME; '.browser' is the longest.
+_GPG_AGENT_SOCKET_NAMES = (
+    'S.gpg-agent', 'S.gpg-agent.extra', 'S.gpg-agent.browser', 'S.gpg-agent.ssh',
+)
+
+
+class GnupgHomePathTooLongError(Exception):
+    pass
+
+
+def check_gnupg_home(gnupg_home):
+    """
+    Raise GnupgHomePathTooLongError if gpg-agent would be unable to bind
+    its Unix-domain sockets under gnupg_home because the resulting path
+    exceeds the kernel's sun_path length limit. gpg-agent's own failure
+    in this case is silent (visible only via GPGME_DEBUG) and gpgme
+    surfaces just a bare "No agent running" error, so this check exists
+    to fail with an actionable message instead.
+    """
+    longest_socket_name = max(_GPG_AGENT_SOCKET_NAMES, key=len)
+    socket_path = os.path.join(gnupg_home, longest_socket_name)
+    socket_path_len = len(os.fsencode(socket_path))
+
+    if socket_path_len >= _UNIX_PATH_MAX:
+        raise GnupgHomePathTooLongError(
+            f'GNUPGHOME path {gnupg_home!r} is too long ({len(gnupg_home)} characters): '
+            f'gpg-agent would need to create the Unix-domain socket {socket_path!r} '
+            f'({socket_path_len} bytes), which exceeds the kernel limit of '
+            f'{_UNIX_PATH_MAX} bytes for a socket path (sizeof(sockaddr_un.sun_path), '
+            f'see <linux/un.h>). gpg-agent would fail to start, and this would surface '
+            f'only as a generic "No agent running" error. Use a shorter --build-dir.')
+
+
 elbe_internal_key_param = """
 <GnupgKeyParms format="internal">
   %no-ask-passphrase
@@ -157,6 +193,8 @@ def unsign_file(fname, gnupg_home):
 
     outfilename = fname[:len(fname) - 4]
 
+    check_gnupg_home(gnupg_home)
+
     ctx = core.Context()
     ctx.set_engine_info(PROTOCOL_OpenPGP,
                         None,
@@ -192,6 +230,8 @@ def unsign_file(fname, gnupg_home):
 
 
 def sign(infile, outfile, fingerprint, gnupg_home):
+
+    check_gnupg_home(gnupg_home)
 
     ctx = core.Context()
 
@@ -239,6 +279,8 @@ def sign_file(fname, fingerprint, gnupg_home):
 
 
 def get_fingerprints(gnupg_home):
+    check_gnupg_home(gnupg_home)
+
     ctx = core.Context()
     ctx.set_engine_info(PROTOCOL_OpenPGP,
                         None,
@@ -261,6 +303,8 @@ EOT = 4294967295
 
 
 def generate_elbe_internal_key(gnupg_home):
+    check_gnupg_home(gnupg_home)
+
     gpg_agent_conf = pathlib.Path(gnupg_home, 'gpg-agent.conf')
     gpg_agent_conf.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     gpg_agent_conf.write_text('allow-preset-passphrase\n'
@@ -278,6 +322,8 @@ def generate_elbe_internal_key(gnupg_home):
 
 
 def export_key(fingerprint, outfile, gnupg_home):
+    check_gnupg_home(gnupg_home)
+
     subprocess.run([
         '/usr/bin/gpg', '-a', '-o', outfile,
         '--export', fingerprint,
