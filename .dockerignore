@@ -1,6 +1,9 @@
 .git
 .mypy_cache
 .pytest_cache
-*.deb
-*.buildinfo
-*.changes
+**/__pycache__
+**/*.pyc
+**/*.orig
+**/*.deb
+**/*.buildinfo
+**/*.changes

@@ -13,7 +13,17 @@ RUN apt-get update -y && \
         ca-certificates
 
 WORKDIR /usr/src/elbe
-COPY . .
+
+COPY debian debian
+COPY elbepack elbepack
+COPY elbevalidate elbevalidate
+COPY docs docs
+COPY examples examples
+COPY newsfragments newsfragments
+COPY tests tests
+COPY test test
+COPY bash-completion elbe setup.py setup.cfg pyproject.toml conftest.py elbe.spec \
+     README.adoc COPYING AUTHORS THANKS CONTRIBUTE.adoc ./
 
 RUN apt-get update -y && \
     apt-get build-dep -y . && \
