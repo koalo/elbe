@@ -252,9 +252,9 @@ def chroot(directory, cmd, /, *, env_add=None, **kwargs):
 
     with bind_mount_pseudo_filesystems_from_host(directory):
         if _is_shell_cmd(cmd):
-            do(['/usr/sbin/chroot', directory, '/bin/sh', '-c', cmd], env_add=new_env, **kwargs)
+            do(['chroot', directory, '/bin/sh', '-c', cmd], env_add=new_env, **kwargs)
         else:
-            do(['/usr/sbin/chroot', directory] + cmd, env_add=new_env, **kwargs)
+            do(['chroot', directory] + cmd, env_add=new_env, **kwargs)
 
 
 def env_add(d):

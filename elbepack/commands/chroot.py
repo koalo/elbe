@@ -11,6 +11,7 @@ import sys
 from elbepack.elbeproject import ElbeProject
 from elbepack.elbexml import ValidationError
 from elbepack.log import elbe_logging
+from elbepack.shellhelper import env_add, get_env_with_sbin
 
 
 def run_command(argv):
@@ -51,8 +52,8 @@ def run_command(argv):
         try:
             with chroot:
                 subprocess.run([
-                    '/usr/sbin/chroot', path,
+                    'chroot', path,
                     *chroot_args,
-                ], check=True)
+                ], check=True, env=env_add(get_env_with_sbin()))
         except subprocess.CalledProcessError as e:
             print(repr(e))
